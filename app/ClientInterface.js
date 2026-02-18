@@ -1,8 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
-import Link from 'next/link';
 
-export default function ClientInterface({ children, serverDB, onSync }) {
+export default function ClientInterface({ children, serverDB, onSync, dbActions }) {
     const [user, setUser] = useState(null);
     const [isAuth, setIsAuth] = useState(false);
     const [loading, setLoading] = useState(true);
@@ -10,7 +9,6 @@ export default function ClientInterface({ children, serverDB, onSync }) {
     const [modalOpen, setModalOpen] = useState(false);
     const [view, setView] = useState('main');
     const [draggedIdx, setDraggedIdx] = useState(null);
-
     const [authMode, setAuthMode] = useState('login');
     const [form, setForm] = useState({ username: '', pass: '' });
     const [newApp, setNewApp] = useState({ name: '', icon: '🌐', url: '' });
@@ -18,9 +16,15 @@ export default function ClientInterface({ children, serverDB, onSync }) {
 
     const cryptoAction = (key, input, mode = 'enc') => {
         try {
-            const str = mode === 'enc' ? JSON.stringify(input) : decodeURIComponent(escape(atob(input)));
-            const result = str.split('').map((c, i) => String.fromCharCode(c.charCodeAt(0) ^ key.charCodeAt(i % key.length))).join('');
-            return mode === 'enc' ? btoa(unescape(encodeURIComponent(result))) : JSON.parse(result);
+            if (mode === 'enc') {
+                const str = JSON.stringify(input);
+                const result = str.split('').map((c, i) => String.fromCharCode(c.charCodeAt(0) ^ key.charCodeAt(i % key.length))).join('');
+                return btoa(unescape(encodeURIComponent(result)));
+            } else {
+                const decoded = decodeURIComponent(escape(atob(input)));
+                const result = decoded.split('').map((c, i) => String.fromCharCode(c.charCodeAt(0) ^ key.charCodeAt(i % key.length))).join('');
+                return JSON.parse(result);
+            }
         } catch (e) { return null; }
     };
 
@@ -31,18 +35,38 @@ export default function ClientInterface({ children, serverDB, onSync }) {
     };
 
     useEffect(() => {
-        const sName = localStorage.getItem('p_user');
-        const sToken = localStorage.getItem('p_token');
-        setTimeout(() => {
-            if (sName && sToken && serverDB[sName]) {
-                const dec = cryptoAction(sToken, serverDB[sName], 'dec');
-                if (dec) {
-                    setUser({ ...dec, username: sName, token: sToken });
+        if (typeof window !== 'undefined' && dbActions) {
+            window.syncDrive = dbActions.syncDrive;
+            window.getUserFiles = dbActions.getUserFiles;
+            window.cryptoAction = cryptoAction;
+        }
+    }, [dbActions]);
+
+    useEffect(() => {
+        const init = async () => {
+            const savedName = localStorage.getItem('p_user');
+            const savedToken = localStorage.getItem('p_token');
+
+            if (savedName && savedToken && serverDB[savedName]) {
+                const entry = serverDB[savedName];
+                let rawData = entry.data || entry;
+
+                try {
+                    const parsed = JSON.parse(rawData);
+                    if (parsed.os) rawData = parsed.os;
+                } catch (e) {}
+
+                const data = cryptoAction(savedToken, rawData, 'dec');
+                if (data) {
+                    setUser({ ...data, username: savedName, token: savedToken });
                     setIsAuth(true);
+                } else {
+                    localStorage.clear();
                 }
             }
             setLoading(false);
-        }, 1500);
+        };
+        init();
     }, [serverDB]);
 
     const handleAuth = async (e) => {
@@ -56,16 +80,24 @@ export default function ClientInterface({ children, serverDB, onSync }) {
                 balance: 1000,
                 apps: [
                     { id: '1', name: 'Search', icon: '🔍', url: '/' },
-                    { id: '2', name: 'Settings', icon: '⚙️', url: 'sys:settings' }
+                    { id: '2', name: 'Settings', icon: '⚙️', url: 'sys:settings' },
+                    { id: '3', name: 'Drive', icon: '☁️', url: '/drive' }
                 ],
                 avatar: ""
             };
             await onSync(name, cryptoAction(token, newUser, 'enc'));
             complete(name, token, newUser);
         } else {
-            const data = serverDB[name] ? cryptoAction(token, serverDB[name], 'dec') : null;
+            const entry = serverDB[name];
+            if (!entry) return alert("User not found!");
+            let rawData = entry.data || entry;
+            try {
+                const parsed = JSON.parse(rawData);
+                if (parsed.os) rawData = parsed.os;
+            } catch (e) {}
+            const data = cryptoAction(token, rawData, 'dec');
             if (data) complete(name, token, data);
-            else alert("Login error!");
+            else alert("Wrong password!");
         }
     };
 
@@ -81,26 +113,23 @@ export default function ClientInterface({ children, serverDB, onSync }) {
         await onSync(username, cryptoAction(token, pure, 'enc'));
         setUser(updated);
     };
-
-    const onDrop = (idx) => {
-        const copy = [...user.apps];
-        const item = copy.splice(draggedIdx, 1)[0];
-        copy.splice(idx, 0, item);
-        sync({ ...user, apps: copy });
-    };
-
     if (loading) return (
         <div className="parrot-loader">
             <style>{`
                 .parrot-loader {
+                    position: fixed;
+                    top: 0;
+                    left: 0;
+                    width: 100vw;
                     height: 100vh;
                     display: flex;
                     flex-direction: column;
                     align-items: center;
                     justify-content: center;
-                    background: url('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1964&auto=format&fit=crop');
-                    color: #fff;
+                    background: transparent;
+                    color: var(--text);
                     font-family: 'Segoe UI Variable Text', sans-serif;
+                    overflow: hidden;
                 }
 
                 .loader-box {
@@ -180,11 +209,11 @@ export default function ClientInterface({ children, serverDB, onSync }) {
                 <div className="logo-sq" style={{ background: 'var(--accent)', width: '50px', height: '50px', borderRadius: '12px', margin: '0 auto 20px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 'bold' }}>P</div>
                 <h2 style={{ marginBottom: '25px' }}>{authMode === 'login' ? 'Login' : 'Create Account'}</h2>
                 <form onSubmit={handleAuth} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                    <input className="inp-v1" placeholder="Username" required onChange={e => setForm({...form, username: e.target.value})} style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }} />
-                    <input className="inp-v1" type="password" placeholder="Password" required onChange={e => setForm({...form, pass: e.target.value})} style={{ background: 'rgba(255,255,255,0.05)', color: 'white' }} />
+                    <input className="inp-v1" placeholder="Username" required onChange={e => setForm({...form, username: e.target.value})} style={{ background: 'rgba(255,255,255,0.05)', color: 'black' }} />
+                    <input className="inp-v1" type="password" placeholder="Password" required onChange={e => setForm({...form, pass: e.target.value})} style={{ background: 'rgba(255,255,255,0.05)', color: 'black' }} />
                     <button type="submit" className="btn-v4" style={{ marginTop: '10px' }}>Sign In</button>
                 </form>
-                <p style={{ marginTop: '20px', fontSize: '12px', opacity: 0.5, cursor: 'pointer', textDecoration: 'underline' }} onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}>
+                <p style={{ marginTop: '20px', fontSize: '12px', opacity: 0.5, cursor: 'pointer', textDecoration: 'underline', color: 'black' }} onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}>
                     {authMode === 'login' ? "Don't have an account? Sign up" : 'Already have an account? Sign in'}
                 </p>
             </div>

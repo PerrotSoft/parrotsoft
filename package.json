@@ -8,8 +8,15 @@
     "start": "next start"
   },
   "dependencies": {
+    "@libsql/client": "^0.17.0",
+    "@supabase/supabase-js": "^2.96.0",
+    "@upstash/redis": "^1.36.2",
+    "@vercel/blob": "^2.2.0",
+    "@vercel/kv": "^3.0.0",
+    "fflate": "^0.8.2",
     "next": "16.1.6",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "server-only": "^0.0.1"
   }
 }
