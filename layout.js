@@ -5,15 +5,9 @@ import { createClient } from '@libsql/client';
 const url = process.env.TURSO_DATABASE_URL;
 const authToken = process.env.TURSO_AUTH_TOKEN;
 
-if (!url && typeof window === 'undefined') {
-  console.warn("Предупреждение: TURSO_DATABASE_URL не найден при сборке");
-}
-
-export const client = (url && authToken) ? createClient({ url, authToken }) : null;
-
-async function ensureTables() {
-  await client.execute(`CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, data TEXT)`);
-}
+export const client = (url && authToken) 
+  ? createClient({ url, authToken }) 
+  : null;
 
 async function getRawUserData(username) {
   const rs = await client.execute({

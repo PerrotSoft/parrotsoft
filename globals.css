@@ -1,0 +1,306 @@
+@import url('https://fonts.googleapis.com/css2?family=Segoe+UI+Variable+Text:wght@400;500;600;700&display=swap');
+ :root {
+    --bg: #f3f3f3;
+    --text: #1b1b1b;
+    --accent: #0078d4;
+    --border-light: rgba(255, 255, 255, 0.3);
+    --border-dark: rgba(0, 0, 0, 0.1);
+    --mica-high: rgba(255, 255, 255, 0.5);
+    --mica-low: rgba(255, 255, 255, 0.15);
+    --blur-intense: blur(40px) saturate(200%);
+    --blur-soft: blur(15px) saturate(130%);
+    --r-default: 12px;
+    --shadow-flat: 0 2px 4px rgba(0, 0, 0, 0.05);
+    --shadow-elevated: 0 12px 32px rgba(0, 0, 0, 0.12);
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+body {
+    background: var(--bg);
+    background: url('https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?q=80&w=1964&auto=format&fit=crop');
+    color: var(--text);
+    font-family: 'Segoe UI Variable Text', -apple-system, sans-serif;
+    margin: 0;
+    padding-bottom: 100px;
+}
+
+.block-v1 {
+    background: var(--mica-high);
+    backdrop-filter: var(--blur-intense);
+    border: 1px solid var(--border-light);
+    box-shadow: var(--shadow-elevated);
+}
+
+.block-v2 {
+    background: rgba(255, 255, 255, 0.05);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    box-shadow: inset 0 0 20px rgba(255, 255, 255, 0.05);
+}
+
+.block-v3 {
+    background: #ffffff;
+    border: 1px solid var(--border-dark);
+    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.08);
+}
+
+.block-v4 {
+    background: transparent;
+    border: 2.5px solid var(--accent);
+    box-shadow: 0 0 25px rgba(0, 120, 212, 0.15);
+}
+
+.block-v5 {
+    background: var(--text);
+    color: #fff;
+    border: none;
+}
+
+.block-v6 {
+    background: rgba(255, 255, 255, 0.01);
+    backdrop-filter: blur(60px);
+    border: 0.5px solid rgba(255, 255, 255, 0.2);
+}
+
+.block-v7 {
+    background: rgba(200, 255, 230, 0.1);
+    backdrop-filter: blur(25px);
+    border: 1px solid rgba(0, 255, 150, 0.2);
+}
+
+.block-v8 {
+    background: var(--mica-low);
+    border: 1px solid transparent;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.06);
+}
+
+.block-v9 {
+    background: none;
+    border: 1px solid var(--text);
+    opacity: 0.8;
+}
+
+.block-v10 {
+    background: rgba(0, 120, 212, 0.05);
+    backdrop-filter: var(--blur-soft);
+    border: 1px solid var(--accent);
+}
+
+.btn-v1 {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-weight: 600;
+    cursor: pointer;
+    padding: 10px 20px;
+}
+
+.btn-v2 {
+    background: var(--mica-high);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    border-radius: 8px;
+    cursor: pointer;
+    padding: 10px 20px;
+}
+
+.btn-v3 {
+    background: transparent;
+    border: 2px solid var(--text);
+    color: var(--text);
+    border-radius: 4px;
+    font-weight: bold;
+    cursor: pointer;
+    padding: 10px 20px;
+}
+
+.btn-v4 {
+    background: linear-gradient(135deg, #0078d4, #005a9e);
+    color: white;
+    border-radius: 25px;
+    border: none;
+    box-shadow: 0 4px 15px rgba(0, 120, 212, 0.4);
+    cursor: pointer;
+    padding: 10px 20px;
+}
+
+.btn-v5 {
+    background: rgba(0, 0, 0, 0.05);
+    border: 1px dashed var(--border-dark);
+    color: var(--text);
+    border-radius: 8px;
+    cursor: pointer;
+    padding: 10px 20px;
+}
+
+.btn-v6 {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(5px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: var(--text);
+    border-radius: 12px;
+    cursor: pointer;
+    padding: 10px 20px;
+}
+
+.btn-v7 {
+    background: #000;
+    color: #fff;
+    border-radius: 0;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    border: none;
+    cursor: pointer;
+    padding: 10px 20px;
+}
+
+.btn-v8 {
+    background: rgba(0, 255, 150, 0.1);
+    color: #008a5d;
+    border: 1px solid #008a5d;
+    border-radius: 20px;
+    cursor: pointer;
+    padding: 10px 20px;
+}
+
+.btn-v9 {
+    background: none;
+    border-bottom: 2px solid var(--accent);
+    color: var(--accent);
+    border-radius: 0;
+    cursor: pointer;
+    padding: 5px 0;
+}
+
+.btn-v10 {
+    background: var(--text);
+    color: var(--bg);
+    border-radius: 50px;
+    padding: 10px 20px;
+    border: none;
+    cursor: pointer;
+}
+
+.inp-v1 {
+    background: var(--mica-high);
+    backdrop-filter: blur(10px);
+    border: 1px solid var(--border-dark);
+    padding: 12px;
+    border-radius: 8px;
+    color: var(--text);
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.inp-v2 {
+    background: rgba(0, 0, 0, 0.05);
+    border: none;
+    border-bottom: 2px solid var(--accent);
+    padding: 12px;
+    border-radius: 4px 4px 0 0;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.inp-v3 {
+    background: transparent;
+    border: 2px solid var(--text);
+    padding: 10px;
+    border-radius: 20px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.inp-v4 {
+    background: #fff;
+    border: 1px solid #000;
+    box-shadow: 4px 4px 0px #000;
+    padding: 12px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.inp-v5 {
+    background: rgba(0, 120, 212, 0.05);
+    border: 1px solid var(--accent);
+    padding: 12px;
+    border-radius: 12px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.inp-v8 {
+    background: #000;
+    color: #0f0;
+    font-family: monospace;
+    border: 1px solid #0f0;
+    padding: 12px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.prog-container {
+    width: 100%;
+    height: 8px;
+    background: rgba(0, 0, 0, 0.1);
+    border-radius: 10px;
+    overflow: hidden;
+    position: relative;
+}
+
+.bar {
+    height: 100%;
+    transition: 0.5s;
+}
+
+.prog-v1 .bar {
+    background: var(--accent);
+    width: 70%;
+}
+
+.prog-v2 .bar {
+    background: linear-gradient(90deg, #ff0080, #7928ca);
+    width: 45%;
+    animation: pulse 2s infinite;
+}
+
+.prog-v5 .bar {
+    background: repeating-linear-gradient(45deg, var(--accent), var(--accent) 10px, #005a9e 10px, #005a9e 20px);
+    width: 90%;
+}
+
+@keyframes pulse {
+    0% {
+        opacity: 0.6;
+    }
+    50% {
+        opacity: 1;
+    }
+    100% {
+        opacity: 0.6;
+    }
+}
+
+.grid-lab {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 25px;
+    padding: 40px;
+}
+
+.card-lab {
+    padding: 25px;
+    border-radius: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+h2 {
+    grid-column: 1 / -1;
+    margin-bottom: 0;
+    font-weight: 600;
+    color: var(--accent);
+}
