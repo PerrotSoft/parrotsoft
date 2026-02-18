@@ -2,54 +2,25 @@ import './globals.css';
 import ClientInterface from './ClientInterface';
 import { createClient } from '@libsql/client';
 
-// 1. Обязательно для Vercel: отключаем статический пререндеринг, так как есть работа с БД
-export const dynamic = 'force-dynamic';
+const client = createClient({
+  url: process.env.TURSO_DATABASE_URL || "libsql://parrotsoft-vercel-icfg-i713yoki8d1eytlkyrwlsfzr.aws-us-east-1.turso.io",
+  authToken: process.env.TURSO_AUTH_TOKEN || "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NzEzNjM2NjIsImlkIjoiN2YyYTY2MDgtYWZjOC00MTQ1LWFlNmYtZDljMDhkZGRhZWE3IiwicmlkIjoiZDU5ZjM3ZTYtZGE5YS00YTA2LTk4OWYtMTBhYTRjNWFmOTViIn0.V6NDZo1wMJNNs5ipc40YkuTCXqG4DwijLBkqtDbr-6_uJa1xCJvHPOvE3jeK2UOfTBtc-cD8SZ0s3tqALRuABA",
+});
 
-// 2. Настройка подключения (локально возьмет из .env, на хостинге из настроек Vercel)
-const url = process.env.TURSO_DATABASE_URL;
-const authToken = process.env.TURSO_AUTH_TOKEN;
-
-// Создаем клиент только если есть ключи, иначе билд упадет на этапе "Generating static pages"
-export const client = (url && authToken) 
-  ? createClient({ url, authToken }) 
-  : null;
-
-// Вспомогательная функция: проверяет готовность клиента перед любым запросом
-const checkClient = () => {
-  if (!client) {
-    console.warn("DB Client is not initialized. Check your environment variables.");
-    return false;
-  }
-  return true;
-};
-
-// 3. Инициализация таблиц (безопасная для тестов и первого запуска)
 async function ensureTables() {
-  if (!checkClient()) return;
-  try {
-    await client.execute(`
-      CREATE TABLE IF NOT EXISTS users (
-        username TEXT PRIMARY KEY, 
-        data TEXT
-      )
-    `);
-  } catch (e) {
-    console.error("Table creation error:", e);
-  }
+  await client.execute(`CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, data TEXT)`);
 }
 
 async function getRawUserData(username) {
-  if (!checkClient()) return { os: null, drive: { files: [], folders: [] }, projects: [] };
-
   const rs = await client.execute({
     sql: "SELECT data FROM users WHERE username = ?",
     args: [String(username)]
   });
-
   if (rs.rows.length > 0 && rs.rows[0].data) {
     const rawContent = rs.rows[0].data;
     try {
       const parsed = JSON.parse(rawContent);
+      // Инициализация структур, если их нет
       if (!parsed.drive) parsed.drive = { files: [], folders: [] };
       if (!parsed.projects) parsed.projects = []; 
       return parsed;
@@ -64,14 +35,13 @@ async function getRawUserData(username) {
   return { os: null, drive: { files: [], folders: [] }, projects: [] };
 }
 
-// --- ФУНКЦИИ ДЛЯ РАБОТЫ С ПРОЕКТАМИ ---
+// --- ФУНКЦИИ ДЛЯ РАБОТЫ С ПРОЕКТАМИ (PROJECTS) ---
 
 export async function syncProjects(username, projectsData) {
   'use server';
-  if (!checkClient()) return;
   await ensureTables();
   const userData = await getRawUserData(username);
-  userData.projects = projectsData;
+  userData.projects = projectsData; // Записываем массив проектов в JSON
 
   await client.execute({
     sql: "INSERT INTO users (username, data) VALUES (?, ?) ON CONFLICT(username) DO UPDATE SET data = excluded.data",
@@ -85,11 +55,10 @@ export async function getProjects(username) {
   return data.projects || [];
 }
 
-// --- ФУНКЦИИ СИНХРОНИЗАЦИИ ---
+// --- СТАНДАРТНЫЕ ФУНКЦИИ СИНХРОНИЗАЦИИ ---
 
 export async function onSync(username, osData) {
   'use server';
-  if (!checkClient()) return;
   await ensureTables();
   const userData = await getRawUserData(username);
   userData.os = osData;
@@ -102,7 +71,6 @@ export async function onSync(username, osData) {
 
 export async function syncDrive(username, driveData) {
   'use server';
-  if (!checkClient()) return;
   await ensureTables();
   const userData = await getRawUserData(username);
   userData.drive = driveData;
@@ -119,22 +87,25 @@ export async function getUserFiles(username) {
   return data.drive;
 }
 
-// --- ГЛАВНЫЙ LAYOUT ---
-
 export default async function RootLayout({ children }) {
   const users = {};
 
-  // Безопасное получение данных при рендере
-  if (client) {
-    try {
+  // Добавляем проверку try-catch. Если база недоступна при сборке, 
+  // билд не упадет, а просто создаст пустой объект пользователей.
+  try {
+    // Выполняем только на сервере
+    if (typeof window === 'undefined') {
       await ensureTables();
       const rs = await client.execute("SELECT * FROM users");
-      rs.rows.forEach(row => {
-        users[row.username] = { data: String(row.data) };
-      });
-    } catch (e) {
-      console.error("Failed to fetch users for Layout:", e);
+      
+      if (rs && rs.rows) {
+        rs.rows.forEach(row => {
+          users[row.username] = { data: String(row.data) };
+        });
+      }
     }
+  } catch (e) {
+    console.warn("[Build Update] База данных недоступна при сборке, пропускаем пререндеринг пользователей.");
   }
 
   return (
@@ -149,8 +120,8 @@ export default async function RootLayout({ children }) {
           dbActions={{ 
             syncDrive, 
             getUserFiles, 
-            syncProjects,
-            getProjects 
+            syncProjects, 
+            getProjects   
           }}
         >
           {children}
