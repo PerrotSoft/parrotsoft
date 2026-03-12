@@ -312,8 +312,7 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
                     </div>
                 </div>
             )}
-
-            <main style={{ filter: (launcherOpen || modalOpen) ? 'blur(10px)' : 'none', transition: '0.4s', paddingTop: 80 }}>
+            <main>
                 {children}
             </main>
         </div>
