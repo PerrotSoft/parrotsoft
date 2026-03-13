@@ -20,6 +20,7 @@ async function getRawUserData(username) {
     const rawContent = rs.rows[0].data;
     try {
       const parsed = JSON.parse(rawContent);
+      // Инициализация структур, если их нет
       if (!parsed.drive) parsed.drive = { files: [], folders: [] };
       if (!parsed.projects) parsed.projects = []; 
       return parsed;
@@ -34,52 +35,14 @@ async function getRawUserData(username) {
   return { os: null, drive: { files: [], folders: [] }, projects: [] };
 }
 
-// --- НОВЫЕ ФУНКЦИИ ДЛЯ ПОИСКОВИКА ---
-
-// 1. Узнать список поиск (Глобальный по всей базе)
-export async function getGlobalSearchList() {
-  'use server';
-  try {
-    await ensureTables();
-    const rs = await client.execute("SELECT username, data FROM users");
-    return rs.rows.map(row => {
-      let content = { projects: [] };
-      try { content = JSON.parse(row.data); } catch(e) {}
-      return {
-        username: row.username,
-        projects: content.projects || []
-      };
-    });
-  } catch (e) {
-    console.error("Search fetch error:", e);
-    return [];
-  }
-}
-
-// 2. Добавить поиск (Добавление одного элемента в массив projects)
-export async function addSearchItem(username, newItem) {
-  'use server';
-  await ensureTables();
-  const userData = await getRawUserData(username);
-  
-  // Создаем ID для нового проекта и пушим в массив
-  const projectWithId = { id: Date.now(), ...newItem };
-  userData.projects.push(projectWithId);
-
-  await client.execute({
-    sql: "INSERT INTO users (username, data) VALUES (?, ?) ON CONFLICT(username) DO UPDATE SET data = excluded.data",
-    args: [String(username), JSON.stringify(userData)]
-  });
-  return { success: true };
-}
-
-// --- ТВОИ ОРИГИНАЛЬНЫЕ ФУНКЦИИ ---
+// --- ФУНКЦИИ ДЛЯ РАБОТЫ С ПРОЕКТАМИ (PROJECTS) ---
 
 export async function syncProjects(username, projectsData) {
   'use server';
   await ensureTables();
   const userData = await getRawUserData(username);
-  userData.projects = projectsData;
+  userData.projects = projectsData; // Записываем массив проектов в JSON
+
   await client.execute({
     sql: "INSERT INTO users (username, data) VALUES (?, ?) ON CONFLICT(username) DO UPDATE SET data = excluded.data",
     args: [String(username), JSON.stringify(userData)]
@@ -92,11 +55,14 @@ export async function getProjects(username) {
   return data.projects || [];
 }
 
+// --- СТАНДАРТНЫЕ ФУНКЦИИ СИНХРОНИЗАЦИИ ---
+
 export async function onSync(username, osData) {
   'use server';
   await ensureTables();
   const userData = await getRawUserData(username);
   userData.os = osData;
+
   await client.execute({
     sql: "INSERT INTO users (username, data) VALUES (?, ?) ON CONFLICT(username) DO UPDATE SET data = excluded.data",
     args: [String(username), JSON.stringify(userData)]
@@ -108,6 +74,7 @@ export async function syncDrive(username, driveData) {
   await ensureTables();
   const userData = await getRawUserData(username);
   userData.drive = driveData;
+
   await client.execute({
     sql: "UPDATE users SET data = ? WHERE username = ?",
     args: [JSON.stringify(userData), String(username)]
@@ -121,20 +88,13 @@ export async function getUserFiles(username) {
 }
 
 export default async function RootLayout({ children }) {
+  await ensureTables();
+  const rs = await client.execute("SELECT * FROM users");
   const users = {};
-  try {
-    if (typeof window === 'undefined') {
-      await ensureTables();
-      const rs = await client.execute("SELECT * FROM users");
-      if (rs && rs.rows) {
-        rs.rows.forEach(row => {
-          users[row.username] = { data: String(row.data) };
-        });
-      }
-    }
-  } catch (e) {
-    console.warn("[Build Update] Database unavailable during build.");
-  }
+  
+  rs.rows.forEach(row => {
+    users[row.username] = { data: String(row.data) };
+  });
 
   return (
     <html lang="ru">
@@ -148,10 +108,8 @@ export default async function RootLayout({ children }) {
           dbActions={{ 
             syncDrive, 
             getUserFiles, 
-            syncProjects, 
-            getProjects,
-            getGlobalSearchList, // Передаем новые функции
-            addSearchItem        // в интерфейс
+            syncProjects, // Добавлено
+            getProjects   // Добавлено
           }}
         >
           {children}
