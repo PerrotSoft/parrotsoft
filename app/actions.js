@@ -10,7 +10,21 @@ const client = createClient({
 async function ensureTables() {
   await client.execute(`CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, data TEXT)`);
 }
+export async function syncDocs(username, docsData) {
+  'use server';
+  const userData = await getRawUserData(username);
+  userData.docs = docsData;
+  await client.execute({
+    sql: "INSERT INTO users (username, data) VALUES (?, ?) ON CONFLICT(username) DO UPDATE SET data = excluded.data",
+    args: [String(username), JSON.stringify(userData)]
+  });
+}
 
+export async function getDocs(username) {
+  'use server';
+  const data = await getRawUserData(username);
+  return data.docs || [];
+}
 async function getRawUserData(username) {
   const rs = await client.execute({
     sql: "SELECT data FROM users WHERE username = ?",
@@ -39,13 +53,23 @@ export async function getGlobalSearchList() {
     await ensureTables();
     const rs = await client.execute("SELECT username, data FROM users");
     return rs.rows.map(row => {
-      let content = { projects: [] };
-      try { content = JSON.parse(row.data); } catch(e) {}
-      return { username: row.username, projects: content.projects || [] };
+      let content = { projects: [], docs: [] }; // Добавляем docs по умолчанию
+      try { 
+        content = JSON.parse(row.data); 
+      } catch(e) {
+        console.error("Parse error for user:", row.username);
+      }
+      return { 
+        username: row.username, 
+        projects: content.projects || [],
+        docs: content.docs || [] // ТЕПЕРЬ СТАТЬИ БУДУТ ПЕРЕДАВАТЬСЯ
+      };
     });
-  } catch (e) { return []; }
+  } catch (e) { 
+    console.error("Global search list error:", e);
+    return []; 
+  }
 }
-
 export async function addSearchItem(username, newItem) {
   await ensureTables();
   const userData = await getRawUserData(username);

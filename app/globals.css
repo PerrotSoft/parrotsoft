@@ -349,3 +349,115 @@ h2 {
 .p-preview-top button { background: none; border: none; color: var(--text); cursor: pointer; font-size: 18px; }
 .p-preview-body { flex: 1; background: #fff; }
 iframe, img { width: 100%; height: 100%; border: none; object-fit: contain; }
+/* globals.css */
+
+/* Microsoft Docs Style (Dotopedia) */
+.ms-docs-layout {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    background-color: #ffffff;
+    color: #171717;
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, sans-serif;
+}
+
+.ms-header {
+    height: 48px;
+    background-color: #f2f2f2;
+    border-bottom: 1px solid #e5e5e5;
+    display: flex;
+    align-items: center;
+    padding: 0 24px;
+    gap: 24px;
+}
+
+.ms-logo {
+    font-size: 1.2rem;
+    font-weight: 600;
+    color: #000;
+    text-decoration: none;
+}
+
+.ms-search-box input {
+    padding: 6px 12px;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    width: 300px;
+    font-size: 0.9rem;
+    outline: none;
+}
+
+.ms-search-box input:focus {
+    border-color: #0078d4;
+}
+
+.ms-container {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+.ms-sidebar {
+    width: 260px;
+    background-color: #faf9f8;
+    border-right: 1px solid #e5e5e5;
+    padding: 24px 0;
+    overflow-y: auto;
+}
+
+.ms-sidebar h3 {
+    padding: 0 24px;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    color: #605e5c;
+    margin-bottom: 12px;
+}
+
+.ms-sidebar nav {
+    display: flex;
+    flex-direction: column;
+}
+
+.ms-sidebar nav a {
+    padding: 8px 24px;
+    color: #171717;
+    text-decoration: none;
+    font-size: 0.9rem;
+}
+
+.ms-sidebar nav a:hover {
+    background-color: #f3f2f1;
+}
+
+.ms-sidebar nav a.active {
+    background-color: #e3f2fd;
+    color: #0078d4;
+    font-weight: 600;
+    border-left: 3px solid #0078d4;
+}
+
+.ms-main-content {
+    flex: 1;
+    padding: 40px 60px;
+    overflow-y: auto;
+    background: #fff;
+}
+
+.markdown-body h1 { margin-bottom: 8px; font-size: 2.2rem; font-weight: 600; }
+.markdown-body h2 { margin-top: 32px; margin-bottom: 16px; font-size: 1.5rem; font-weight: 600; padding-bottom: 6px; border-bottom: 1px solid #e5e5e5; }
+.markdown-body p { margin-bottom: 16px; line-height: 1.6; color: #3b3a39; }
+.markdown-body code { background: #f3f2f1; padding: 2px 6px; border-radius: 4px; font-family: monospace; font-size: 0.9em; }
+.markdown-body pre { background: #111; color: #fff; padding: 16px; border-radius: 8px; overflow-x: auto; margin-bottom: 16px; }
+.markdown-body pre code { background: none; color: inherit; padding: 0; }
+.markdown-body table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+.markdown-body th, .markdown-body td { border: 1px solid #e5e5e5; padding: 8px 12px; text-align: left; }
+.markdown-body th { background-color: #faf9f8; }
+.markdown-body a { color: #0078d4; text-decoration: none; }
+.markdown-body a:hover { text-decoration: underline; }
+
+.doc-meta { color: #605e5c; font-size: 0.85rem; margin-bottom: 32px; }
+
+.search-results .result-card { margin-bottom: 24px; }
+.search-results .result-title { font-size: 1.2rem; color: #0078d4; font-weight: 600; text-decoration: none; display: block; margin-bottom: 4px; }
+.search-results .result-title:hover { text-decoration: underline; }
+.search-results p { color: #605e5c; font-size: 0.95rem; line-height: 1.5; }
