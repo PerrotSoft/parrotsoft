@@ -12,7 +12,7 @@ export default function DatapediaPage() {
     const router = useRouter();
     const docName = searchParams.get('doc') || "Home";
     const sidebarQuery = (searchParams.get('dq') || "").toLowerCase();
-
+    const [isSideOpen, setIsSideOpen] = useState(false);
     const [allDocs, setAllDocs] = useState([]);
     const [currentUser, setCurrentUser] = useState(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
@@ -105,13 +105,16 @@ export default function DatapediaPage() {
 
     return (
         <div className="dp-root">
+            <button className="dp-mobile-menu-btn" onClick={() => setIsSideOpen(true)}>☰</button>
             {/* Сайдбар */}
-            <aside className="dp-sidebar">
+            <aside className={`dp-sidebar ${isSideOpen ? 'open' : ''}`}>
                 <div className="dp-side-top">
-                    <div className="dp-brand" onClick={() => router.push('/datapedia')}>
-                        <div className="dp-logo-cube">P</div>
+                    <div className="dp-brand">
+                        <div className="dp-logo-cube" onClick={() => router.push('/datapedia')}>P</div>
                         <span>Datapedia</span>
+                        <button className="dp-close-sidebar" onClick={() => setIsSideOpen(false)}>×</button>
                     </div>
+                    
                     <div className="dp-search-bar">
                         <input placeholder="Search docs..." onChange={e => router.push(`?dq=${e.target.value}`)} />
                     </div>
@@ -120,7 +123,10 @@ export default function DatapediaPage() {
                             <div 
                                 key={i} 
                                 className={`dp-nav-item ${docName === a.name ? 'active' : ''}`}
-                                onClick={() => router.push(`?doc=${encodeURIComponent(a.name)}`)}
+                                onClick={() => {
+                                    router.push(`?doc=${encodeURIComponent(a.name)}`);
+                                    setIsSideOpen(false); // АВТО-ЗАКРЫТИЕ после выбора
+                                }}
                             >
                                 <span className="dp-nav-icon">{a.icon}</span>
                                 <div className="dp-nav-txt">
@@ -240,6 +246,119 @@ export default function DatapediaPage() {
                 .dp-foot-btns { display: flex; gap: 15px; }
                 .dp-btn-pri { background: #fff; color: #000; border: none; padding: 10px 25px; border-radius: 6px; font-weight: 700; cursor: pointer; }
                 .dp-btn-sec { background: transparent; color: #555; border: none; cursor: pointer; }
+                /* Кнопка меню (по умолчанию скрыта) */
+.dp-mobile-menu-btn {
+    display: none;
+    position: fixed;
+    top: 15px;
+    left: 15px;
+    z-index: 90;
+    background: #fff;
+    color: #000;
+    border: none;
+    border-radius: 8px;
+    width: 40px;
+    height: 40px;
+    font-size: 20px;
+    cursor: pointer;
+}
+
+.dp-close-sidebar { display: none; }
+
+@media (max-width: 850px) {
+    .dp-mobile-menu-btn { display: block; }
+
+    .dp-sidebar {
+        position: fixed;
+        left: -100%; /* Прячем за экран */
+        top: 0;
+        bottom: 0;
+        width: 85% !important; /* На весь экран (почти) */
+        z-index: 1000;
+        transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        box-shadow: 20px 0 50px rgba(0,0,0,0.5);
+    }
+
+    .dp-sidebar.open {
+        left: 0; /* Выезжает */
+    }
+
+    .dp-close-sidebar {
+        display: block;
+        margin-left: auto;
+        background: none;
+        border: none;
+        color: #555;
+        font-size: 24px;
+    }
+
+    .dp-sidebar-overlay {
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,0.7);
+        backdrop-filter: blur(4px);
+        z-index: 999;
+    }
+
+    .dp-main {
+        padding: 80px 20px 30px; /* Отступ сверху для кнопки */
+    }
+
+    h1 {
+        font-size: 2.5rem;
+    }
+
+    .dp-nav-txt {
+        display: block !important; /* Возвращаем текст в мобильном меню */
+    }
+}
+
+
+@media (max-width: 850px) {
+    /* Базовый стиль для заголовка сайдбара */
+.dp-sidebar-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 25px;
+    padding: 0 10px;
+}
+
+/* На ПК кнопка закрытия нам не нужна */
+.dp-close-sidebar {
+    display: none;
+}
+
+/* Убираем старый маргин у бренда, так как он теперь в контейнере */
+.dp-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 800;
+    cursor: pointer;
+    margin-bottom: 0 !important; 
+}
+    .dp-close-sidebar {
+        display: flex; /* Показываем только на мобилках */
+        align-items: center;
+        justify-content: center;
+        background: #1a1a1a;
+        border: none;
+        color: #888;
+        font-size: 24px;
+        width: 32px;
+        height: 32px;
+        border-radius: 6px;
+        cursor: pointer;
+        line-height: 1;
+        padding-bottom: 4px; /* Небольшая корректировка центровки крестика */
+    }
+
+    .dp-close-sidebar:active {
+        background: #333;
+        color: #fff;
+    }
+}
             `}</style>
         </div>
     );

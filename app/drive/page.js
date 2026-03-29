@@ -172,7 +172,7 @@ export default function ParrotDrive() {
     return (
         <div className="p-drive">
             <header className="p-header">
-                <div className="p-logo">Parrot<span>OS</span></div>
+                <div className="p-logo">Parrot<span> Drive</span></div>
                 
                 <div className="p-tools">
                     <button className="p-btn-new" onClick={() => setEditor("")}>📄 Create file</button>
@@ -190,8 +190,9 @@ export default function ParrotDrive() {
                             save({...drive, files: [...(drive?.files || []), {id: Date.now(), name: f.name, data: Array.from(encrypted), parentId: currentPath, access: 'private'}]});
                         }} />
                     </label>
+                    <input className="p-search" placeholder="Searching for files..." onChange={e => setSearch(e.target.value)} />
                 </div>
-
+                        
                 {selected.size === 1 && selectedItem && (
                     <div className="p-selection-tools">
                         <button onClick={() => selectedItem.data ? handleView(selectedItem) : setCurrentPath(selectedItem.id)}>👁️ View</button>
@@ -204,7 +205,7 @@ export default function ParrotDrive() {
                     </div>
                 )}
                 
-                <input className="p-search" placeholder="Searching for files..." onChange={e => setSearch(e.target.value)} />
+                
             </header>
 
             <nav className="p-breadcrumb">

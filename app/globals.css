@@ -461,3 +461,179 @@ iframe, img { width: 100%; height: 100%; border: none; object-fit: contain; }
 .search-results .result-title { font-size: 1.2rem; color: #0078d4; font-weight: 600; text-decoration: none; display: block; margin-bottom: 4px; }
 .search-results .result-title:hover { text-decoration: underline; }
 .search-results p { color: #605e5c; font-size: 0.95rem; line-height: 1.5; }
+/* --- ПОЛНЫЙ МОБИЛЬНЫЙ СТИЛЬ (REMASTERED) --- */
+
+@media (max-width: 768px) {
+    /* 1. Глобальный сброс: убираем горизонтальный скролл */
+    html, body {
+        overflow-x: hidden;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+    }
+
+    /* 2. Контейнеры со "швом": всегда оставляют зазор от края экрана */
+    .hp-wrapper, .container, .search-page, .search-input-container {
+        width: 100% !important;
+        max-width: 100% !important;
+        padding-left: 15px !important; 
+        padding-right: 15px !important;
+        box-sizing: border-box !important;
+    }
+
+    /* 3. ГЛАВНАЯ СТРАНИЦА: Логотип и Поиск */
+    .hp-logo, .logo {
+        /* Шрифт подстраивается под ширину экрана, но не больше 3rem */
+        font-size: clamp(2rem, 12vw, 3.5rem) !important;
+        letter-spacing: -1px !important;
+        word-wrap: break-word;
+    }
+
+    .hp-search-box, .search-input-container input {
+        width: 100% !important;
+        min-width: 0 !important; /* Позволяет сжиматься до упора */
+        height: auto !important;
+        font-size: 16px !important; /* Фикс зума на iOS */
+        padding: 12px 15px !important;
+        box-sizing: border-box !important;
+    }
+
+    /* Кнопки на главной встают в столбик, чтобы не жаться */
+    .hp-actions {
+        flex-direction: column !important;
+        width: 100% !important;
+        gap: 10px !important;
+    }
+    .hp-actions button {
+        width: 100% !important;
+    }
+
+    /* 4. СТРАНИЦА ПОИСКА: Результаты */
+    .results-list {
+        width: 100% !important;
+    }
+
+    .result-item {
+        width: 100% !important;
+        box-sizing: border-box !important;
+        gap: 12px !important;
+        padding: 12px !important;
+        align-items: flex-start !important;
+    }
+
+    .result-item .text {
+        overflow: hidden; /* Чтобы длинные ссылки не рвали блок */
+    }
+
+    .result-item .title {
+        font-size: 1.1rem !important;
+        display: block !important; /* Автор под заголовком */
+    }
+
+    .result-item .user {
+        display: block;
+        margin-left: 0 !important;
+        margin-top: 4px;
+    }
+
+    /* 5. ФИКС КНОПКИ "+" (FAB) */
+    /* Теперь она не обрезается, так как привязана к экрану */
+    .add-fab {
+        position: fixed !important;
+        bottom: 25px !important;
+        right: 25px !important;
+        width: 50px !important;
+        height: 50px !important;
+        border-radius: 50% !important;
+        z-index: 1000 !important;
+        display: flex !important;
+        align-items: center;
+        justify-content: center;
+    }
+}
+
+                @media (max-width: 768px) {
+                    .p-header {
+                        flex-direction: column;
+                        height: auto;
+                        padding: 15px;
+                        gap: 15px;
+                    }
+
+                    .p-tools {
+                        display: grid;
+                        grid-template-columns: 1fr 1fr;
+                        width: 100%;
+                        gap: 8px;
+                    }
+
+                    .p-btn-new, .p-btn-up {
+                        width: 100%;
+                        justify-content: center;
+                        font-size: 13px;
+                        padding: 10px 5px;
+                    }
+
+                    .p-selection-tools {
+                        width: 100%;
+                        overflow-x: auto;
+                        padding-bottom: 5px;
+                    }
+
+                    .p-main-content {
+                        flex-direction: column;
+                    }
+
+                    .p-sidebar {
+                        width: 100%;
+                        height: auto;
+                        display: flex;
+                        overflow-x: auto;
+                        border-right: none;
+                        border-bottom: 1px solid var(--border-dark);
+                        padding: 10px;
+                        gap: 10px;
+                    }
+
+                    .p-sidebar div {
+                        white-space: nowrap;
+                        padding: 8px 15px;
+                    }
+
+                    .p-grid {
+                        grid-template-columns: repeat(auto-fill, minmax(90px, 1fr));
+                        padding: 15px;
+                        gap: 10px;
+                    }
+
+                    .p-item {
+                        width: 100%;
+                        height: 100px;
+                    }
+
+                    .p-icon {
+                        font-size: 32px;
+                    }
+
+                    .p-name {
+                        font-size: 11px;
+                    }
+
+                    /* Модалка редактора на весь экран */
+                    .p-editor-box {
+                        width: 95% !important;
+                        height: 90vh !important;
+                    }
+
+                    /* Превью на весь экран */
+                    .p-preview-window {
+                        width: 100% !important;
+                        height: 100% !important;
+                        border-radius: 0;
+                    }
+
+                    .p-preview-body img {
+                        max-width: 100%;
+                        object-fit: contain;
+                    }
+                }
