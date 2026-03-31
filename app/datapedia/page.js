@@ -18,7 +18,6 @@ export default function DatapediaPage() {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [loading, setLoading] = useState(true);
     
-    // Поля формы + галочка для поисковика
     const [form, setForm] = useState({ 
         name: '', 
         content: '', 
@@ -32,7 +31,6 @@ export default function DatapediaPage() {
             const allUsers = await getGlobalSearchList();
             const combined = [];
             allUsers.forEach(user => {
-                // Теперь в user.docs точно будут данные из базы
                 if (user.docs && Array.isArray(user.docs)) {
                     user.docs.forEach(d => {
                         combined.push({ ...d, owner: user.username });
@@ -49,7 +47,7 @@ export default function DatapediaPage() {
     useEffect(() => {
         const saved = localStorage.getItem('p_user');
         if (saved) setCurrentUser(saved);
-        loadData(); // Вызываем при загрузке страницы
+        loadData();
     }, []);
 
     const allArticles = useMemo(() => [
@@ -64,8 +62,6 @@ export default function DatapediaPage() {
     const filteredSidebar = allArticles.filter(a => 
         a.name.toLowerCase().includes(sidebarQuery) || a.owner.toLowerCase().includes(sidebarQuery)
     );
-
-    // ФУНКЦИЯ СОХРАНЕНИЯ (ИСПРАВЛЕННАЯ)
     const handleSave = async () => {
         if (!form.name.trim() || !currentUser) return;
         
@@ -77,11 +73,8 @@ export default function DatapediaPage() {
         };
         
         try {
-            // 1. Сохраняем в личные документы (чтобы видеть в Datapedia)
             const myOldDocs = allDocs.filter(d => d.owner === currentUser);
             await syncDocs(currentUser, [...myOldDocs, newDoc]);
-
-            // 2. ДОБАВЛЯЕМ В ПОИСКОВИК (Если стоит галочка)
             if (form.publishToSearch) {
                 await addSearchItem(currentUser, {
                     name: newDoc.name,
@@ -89,8 +82,6 @@ export default function DatapediaPage() {
                     url: `https://parrotsoft.vercel.app/datapedia?doc=${encodeURIComponent(newDoc.name)}`
                 });
             }
-
-            // Обновляем локальное состояние и закрываем
             setAllDocs(prev => [...prev, newDoc]);
             setIsModalOpen(false);
             setForm({ name: '', content: '', icon: '📄', publishToSearch: true });
@@ -125,7 +116,7 @@ export default function DatapediaPage() {
                                 className={`dp-nav-item ${docName === a.name ? 'active' : ''}`}
                                 onClick={() => {
                                     router.push(`?doc=${encodeURIComponent(a.name)}`);
-                                    setIsSideOpen(false); // АВТО-ЗАКРЫТИЕ после выбора
+                                    setIsSideOpen(false);
                                 }}
                             >
                                 <span className="dp-nav-icon">{a.icon}</span>

@@ -1,4 +1,3 @@
-// app/search/page.js
 import { getGlobalSearchList } from '../actions';
 import Link from 'next/link';
 

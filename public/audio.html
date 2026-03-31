@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Web PStudio</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
+    <script src="https://unpkg.com/@tonejs/midi"></script>
+    <script src="https://cdn.jsdelivr.net/npm/midi-writer-js@2.1.4/browser/index.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet" />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/prism.min.js"></script>
+    <style>
+        :root { 
+            --bg: #0b0c0f; 
+            --panel: #16181d; 
+            --accent: #ffa500; 
+            --accent-glow: rgba(255, 165, 0, 0.4);
+            --green: #00ff95; 
+            --border: #2a2d34; 
+            --note: #ff9d00; 
+            --text: #c0c0c0;
+            --key-w: #e0e0e0;
+            --key-b: #1a1a1a;
+            --grid-bg: #131418;
+        }
+        
+        body, html { 
+            margin: 0; padding: 0; height: 100%; width: 100%;
+            background: var(--bg); color: var(--text); 
+            font-family: 'Segoe UI', Roboto, sans-serif; 
+            overflow: hidden; display: flex; flex-direction: column; 
+            user-select: none;
+        }
+        
+        .header { background: #000; height: 50px; display: flex; align-items: center; padding: 0 15px; gap: 12px; border-bottom: 1px solid var(--border); z-index: 100; box-shadow: 0 2px 10px rgba(0,0,0,0.5); }
+        .btn { background: var(--panel); border: 1px solid var(--border); color: #fff; padding: 5px 12px; cursor: pointer; border-radius: 2px; font-size: 11px; font-weight: 700; text-transform: uppercase; transition: 0.2s; }
+        .btn:hover { background: #2a2d34; border-color: var(--accent); }
+        .btn.active { background: var(--accent); color: #000; box-shadow: 0 0 10px var(--accent-glow); }
+        .lcd { background: #000; border: 1px solid #333; padding: 4px 10px; color: var(--green); font-family: 'Courier New', monospace; font-size: 14px; border-radius: 3px; display: flex; align-items: center; gap: 5px; }
+        .lcd input, .lcd select { background: none; border: none; color: inherit; font-family: inherit; font-size: inherit; width: 45px; outline: none; }
+
+        #main-container { display: flex; flex-grow: 1; overflow: hidden; }
+        
+        #mixer-rack { width: 320px; background: #111215; border-right: 1px solid var(--border); display: flex; flex-direction: column; z-index: 10; }
+        .mixer-title { padding: 10px; font-size: 10px; color: #666; text-transform: uppercase; letter-spacing: 2px; background: #000; border-bottom: 1px solid var(--border); }
+        #track-list { flex-grow: 1; overflow-y: auto; padding: 8px; }
+        
+        .mixer-strip { background: var(--panel); margin-bottom: 8px; padding: 12px; border-radius: 4px; border: 1px solid var(--border); transition: 0.2s; cursor: pointer; }
+        .mixer-strip.active { border-color: var(--accent); background: #1c1e24; box-shadow: 0 0 10px var(--accent-glow); }
+        .strip-header { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 10px; font-weight: bold; color: var(--accent); }
+        .fader-box { display: flex; align-items: center; gap: 10px; }
+        .fader { flex-grow: 1; height: 5px; appearance: none; background: #000; outline: none; border-radius: 3px; }
+        .fader::-webkit-slider-thumb { appearance: none; width: 16px; height: 16px; background: #eee; border-radius: 2px; cursor: pointer; border: 1px solid #999; }
+        .v-meter { width: 6px; height: 35px; background: #050505; border-radius: 1px; position: relative; overflow: hidden; }
+        .v-fill { position: absolute; bottom: 0; width: 100%; background: linear-gradient(to top, #00ff00, #ffff00, #ff0000); height: 0%; transition: height 0.1s; }
+
+        #piano-roll { flex-grow: 1; overflow: auto; background: var(--grid-bg); position: relative; }
+        .grid-container { display: flex; position: relative; width: fit-content; }
+        .grid { display: grid; position: relative; width: fit-content; background-color: var(--grid-bg); 
+                background-image: linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), 
+                                  linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px); 
+                background-size: 40px 20px; }
+        .cell { width: 40px; height: 20px; border-right: 1px solid rgba(255,255,255,0.02); border-bottom: 1px solid rgba(255,255,255,0.02); box-sizing: border-box; }
+        .cell:nth-child(16n) { border-right: 1px solid #444; }
+        
+        .note-block { position: absolute; background: var(--note); border: 1px solid #000; border-radius: 2px; height: 18px; top: 1px; z-index: 5; 
+                      box-shadow: inset 0 0 5px rgba(255,255,255,0.4); cursor: pointer; }
+        .note-block:hover { filter: brightness(1.2); }
+        .note-block::after { content: ''; position: absolute; right: 0; top: 0; bottom: 0; width: 8px; background: rgba(0,0,0,0.2); cursor: ew-resize; border-radius: 0 2px 2px 0; }
+
+        .keys { width: 65px; position: sticky; left: 0; z-index: 50; background: #000; border-right: 2px solid var(--accent); }
+        .key { height: 20px; border-bottom: 1px solid #111; font-size: 9px; text-align: right; padding-right: 5px; line-height: 20px; background: var(--key-w); color: #000; font-weight: bold; }
+        .key.black { background: var(--key-b); color: #888; border-bottom: 1px solid #000; }
+
+        #playhead { position: absolute; top: 0; left: 0; width: 2px; height: 100%; background: #fff; box-shadow: 0 0 15px #fff; z-index: 60; pointer-events: none; }
+
+        #bottom-panel { height: 220px; background: #0a0b0e; border-top: 1px solid var(--border); display: flex; gap: 0; z-index: 10; }
+        
+        #js-plugin-editor { flex: 1; display: flex; flex-direction: column; border-right: 1px solid var(--border); }
+        .editor-header { background: #000; color: var(--accent); font-size: 10px; padding: 5px 10px; font-weight: bold; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        
+        .editor-wrapper { position: relative; flex: 1; overflow: hidden; background: #050505; }
+        #plugin-code, #highlighting-content {
+            margin: 0; padding: 12px; border: 0; width: 100%; height: 100%;
+            font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; line-height: 1.5;
+            position: absolute; top: 0; left: 0; box-sizing: border-box; white-space: pre; overflow: auto; tab-size: 4;
+        }
+        #plugin-code { color: transparent; background: transparent; caret-color: #fff; z-index: 2; outline: none; resize: none; }
+        #highlighting-content { z-index: 1; pointer-events: none; }
+        
+        .fx-rack { width: 450px; display: flex; padding: 10px; gap: 15px; overflow-x: auto; background: #0c0d10; }
+        .fx-unit { background: var(--panel); border: 1px solid var(--border); border-radius: 4px; min-width: 200px; padding: 10px; display: flex; flex-direction: column; }
+        .fx-label { font-size: 9px; color: var(--accent); margin-bottom: 12px; text-align: center; font-weight: bold; border-bottom: 1px solid var(--border); padding-bottom: 5px; text-transform: uppercase; }
+        .knobs { display: flex; justify-content: space-around; flex-grow: 1; }
+        .knob-unit { display: flex; flex-direction: column; align-items: center; font-size: 9px; color: #888; gap: 5px; }
+        .knob-unit span { font-size: 8px; }
+        .knob-unit input { width: 30px; height: 80px; appearance: slider-vertical; background: #000; cursor: pointer; }
+        @media screen and (max-width: 1px) {
+    /* Перестраиваем шапку: кнопки в два ряда */
+    .header {
+        height: auto;
+        flex-wrap: wrap;
+        padding: 10px;
+        gap: 8px;
+    }
+
+    .header div[style*="font-size: 18px"] {
+        width: 100%; /* Заголовок на всю ширину */
+        text-align: center;
+    }
+
+    /* Скрываем визуализатор на мобилках для экономии места */
+    #master-visualizer {
+        display: none;
+    }
+
+    /* Главный контейнер: микшер сверху, пиано-ролл снизу */
+    #main-container {
+        flex-direction: column;
+    }
+
+    /* Микшер: делаем его горизонтальным списком или компактнее */
+    #mixer-rack {
+        width: 100%;
+        height: 180px;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+    }
+
+    #track-list {
+        display: flex;
+        flex-direction: row;
+        overflow-x: auto;
+        gap: 10px;
+    }
+
+    .mixer-strip {
+        min-width: 140px;
+        margin-bottom: 0;
+    }
+
+    /* Пиано-ролл: увеличиваем высоту клавиш для удобства нажатия пальцем */
+    .key {
+        height: 30px;
+        line-height: 30px;
+        font-size: 12px;
+    }
+
+    .cell {
+        height: 30px;
+        width: 50px; /* Делаем сетку крупнее для тач-скрина */
+    }
+
+    .grid {
+        background-size: 50px 30px;
+    }
+
+    .note-block {
+        height: 28px;
+    }
+
+    /* Нижняя панель: скрываем редактор кода (на мобилке писать код неудобно) 
+       или делаем его на весь экран при клике */
+    #bottom-panel {
+        flex-direction: column;
+        height: auto;
+        overflow-y: auto;
+    }
+
+    #js-plugin-editor {
+        height: 200px;
+        border-right: none;
+        border-bottom: 1px solid var(--border);
+    }
+
+    .fx-rack {
+        width: 100%;
+        padding: 20px 10px;
+    }
+
+    .fx-unit {
+        min-width: 280px;
+    }
+
+    /* Увеличиваем кнопки для пальцев */
+    .btn {
+        padding: 10px 15px;
+        font-size: 12px;
+    }
+}
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <div style="font-weight: 900; color: var(--accent); font-size: 18px; letter-spacing: -1px;">Web PStudio <span style="color: #fff; font-weight: 100;">ParrotSoft</span></div>
+    <button class="btn" onclick="togglePlay()" id="playBtn">▶ START ENGINE</button>
+    <button class="btn" onclick="exportMIDI()">💾 EXPORT MIDI</button>
+    <button class="btn" onclick="document.getElementById('midiIn').click()">📂 IMPORT MIDI</button>
+    <input type="file" id="midiIn" hidden onchange="importMIDI(event)">
+    <button class="btn" onclick="saveParrotProject()" style="background: #2d3e33;">💾 SAVE PROJECT</button>
+    <button class="btn" onclick="document.getElementById('projectIn').click()" style="background: #3e2d2d;">📂 LOAD PROJECT</button>
+    <input type="file" id="projectIn" hidden onchange="loadParrotProject(event)">
+    <button class="btn" onclick="recordAudio()" id="recordBtn" style="background: #4a1010;">🔴 RECORD TO AUDIO</button>
+    <div class="lcd">BPM: <input type="number" id="bpm" value="120" onchange="updateBPM()"></div>
+    <div class="lcd">SONG LEN: <input type="number" id="song-length" value="128" onchange="resizeSong()"></div>
+    
+    <div class="lcd">
+        STEP: <select id="defaultLen" style="background:none; border:none; color:inherit; outline:none; font-size: 12px; cursor:pointer;">
+            <option value="1">1/16</option>
+            <option value="2">1/8</option>
+            <option value="4" selected>1/4 (Beat)</option>
+            <option value="8">1/2</option>
+            <option value="16">1 Bar</option>
+        </select>
+    </div>
+    
+    <div style="flex-grow: 1"></div>
+    <canvas id="master-visualizer" style="height:35px; width:180px; background:#000; border:1px solid #333; border-radius: 3px;"></canvas>
+</div>
+
+<div id="main-container">
+    <div id="mixer-rack">
+        <div class="mixer-title">Mixer Console / Inserts</div>
+        <div id="track-list"></div>
+        <button class="btn" style="margin:10px; background: #222;" onclick="addNewTrack()">+ ADD TRACK (INSTRUMENT)</button>
+    </div>
+    
+    <div id="piano-roll">
+        <div id="playhead"></div>
+        <div class="grid-container">
+            <div id="keys" class="keys"></div>
+            <div id="grid" class="grid" onmousedown="handleGridMouseDown(event)"></div>
+        </div>
+    </div>
+</div>
+
+<div id="bottom-panel">
+    <div id="js-plugin-editor">
+        <div class="editor-header">
+            <span>JAVASCRIPT PLUGIN LOADER (LIVE SCRIPTING)</span>
+            <button class="btn" onclick="runCustomPlugin()" style="background: var(--green); color: #000; padding: 2px 8px;">COMPILE SCRIPT</button>
+        </div>
+        <div class="editor-wrapper">
+            <pre id="highlighting-content" aria-hidden="true"><code class="language-javascript" id="highlighting-code"></code></pre>
+            <textarea id="plugin-code" spellcheck="false" oninput="updateEditor()" onscroll="syncScroll()" onkeydown="handleTab(event)">// Введите JS код для управления инструментом канала.
+// Доступные переменные: 'instr' (синтезатор), 'Tone' (библиотека).
+// Пример: Убрать все высокие частоты (фильтрация шума)
+
+const filter = new Tone.Filter(1200, "lowpass").toDestination();
+instr.disconnect();
+instr.connect(filter);
+console.log("Plugin Applied: Noise Filter Active");</textarea>
+        </div>
+    </div>
+
+    <div class="fx-rack">
+        <div class="fx-unit">
+            <div class="fx-label">Fruity Parametric Filter</div>
+            <div class="knobs">
+                <div class="knob-unit"><span>LOW</span><input type="range" min="20" max="1000" step="10" value="400" id="eq-low"></div>
+                <div class="knob-unit"><span>FREQ</span><input type="range" min="100" max="8000" step="50" value="2500" id="eq-hi" oninput="updateMasterFX()"></div>
+                <div class="knob-unit"><span>RES</span><input type="range" min="0" max="10" step="0.1" value="1" id="eq-res" oninput="updateMasterFX()"></div>
+            </div>
+        </div>
+        <div class="fx-unit">
+            <div class="fx-label">Fruity Reeverb 2</div>
+            <div class="knobs">
+                <div class="knob-unit"><span>DECAY</span><input type="range" min="0.1" max="10" step="0.1" value="2.5" id="rev-size" oninput="updateMasterFX()"></div>
+                <div class="knob-unit"><span>WET</span><input type="range" min="0" max="1" step="0.05" value="0.2" id="rev-wet" oninput="updateMasterFX()"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    let STEPS = 128;
+    const ROWS = 60;
+    const NOTES = [];
+    const noteNames = ['B','A#','A','G#','G','F#','F','E','D#','D','C#','C'];
+    for(let o=6; o>=2; o--) noteNames.forEach(n => NOTES.push(n + o));
+
+    let tracks = [];
+    let activeTrackIdx = 0;
+    let isPlaying = false;
+    let currentStep = 0;
+    let dragState = null;
+
+    const masterLimiter = new Tone.Limiter(-1).toDestination();
+    const masterAnalyser = new Tone.Analyser("waveform", 128);
+    const masterReverb = new Tone.Reverb(2.5).connect(masterLimiter);
+    const masterFilter = new Tone.Filter(2500, "lowpass").connect(masterReverb);
+    masterLimiter.connect(masterAnalyser);
+
+    function createBassPiano() {
+        return new Tone.PolySynth(Tone.Synth, {
+            oscillator: { type: "triangle" },
+            envelope: { attack: 0.05, decay: 0.3, sustain: 0.5, release: 1.2 }
+        });
+    }
+    const SAMPLE_PRESETS = {
+        "Piano (Default)": "https://tonejs.github.io/audio/salamander/C4.mp3",
+        "Kick Deep": "https://raw.githubusercontent.com/Tonejs/audio/master/drum-samples/CR78/kick.mp3",
+        "Kick Tight": "https://raw.githubusercontent.com/Tonejs/audio/master/drum-samples/Kit3/kick.mp3",
+        "Bass Heavy": "https://raw.githubusercontent.com/Tonejs/audio/master/casio/A1.mp3",
+        "Bass Sub": "https://raw.githubusercontent.com/Tonejs/audio/master/casio/C2.mp3",
+        "Sans Voice": "https://tonejs.github.io/audio/casio/A1.mp3",
+        "8-bit Lead": "https://raw.githubusercontent.com/Tonejs/audio/master/casio/Gs1.mp3",
+        "Snare Pop": "https://raw.githubusercontent.com/Tonejs/audio/master/drum-samples/CR78/snare.mp3",
+        "Hi-Hat": "https://raw.githubusercontent.com/Tonejs/audio/master/drum-samples/CR78/hihat.mp3",
+        "Organ Retro": "https://tonejs.github.io/audio/casio/G2.mp3"
+    };
+    function addNewTrack(name = "Sampler") {
+        const id = tracks.length;
+        const channelFilter = new Tone.Filter(4000, "lowpass").connect(masterFilter);
+        const channelVol = new Tone.Volume(-12).connect(channelFilter);
+        const meter = new Tone.Meter();
+        channelVol.connect(meter);
+
+        // Добавлена обработка ошибок загрузки, чтобы плеер не вис
+        const sampler = new Tone.Sampler({
+            urls: { "C4": "https://tonejs.github.io/audio/salamander/C4.mp3" },
+            release: 1,
+            baseUrl: "",
+            onload: () => { console.log("Трек " + id + " загружен"); },
+            onerror: (err) => { 
+                console.warn("Ошибка загрузки сэмпла, используем заглушку");
+                t.sampleLoaded = false;
+            }
+        }).connect(channelVol);
+
+        const newTrack = {
+            name: name + " " + (id + 1),
+            notes: [],
+            inst: sampler,
+            volume: channelVol,
+            filter: channelFilter,
+            meter: meter,
+            volVal: -12,
+            lastScript: "",
+            sampleLoaded: true,
+            currentUrl: ""
+        };
+        tracks.push(newTrack);
+        renderMixer();
+    }
+
+    function addNewTrack(name = "Sampler") {
+        const id = tracks.length;
+        const channelFilter = new Tone.Filter(4000, "lowpass").connect(masterFilter);
+        const channelVol = new Tone.Volume(-12).connect(channelFilter);
+        const meter = new Tone.Meter();
+        channelVol.connect(meter);
+
+        // Добавлена обработка ошибок загрузки, чтобы плеер не вис
+        const sampler = new Tone.Sampler({
+            urls: { "C4": "https://tonejs.github.io/audio/salamander/C4.mp3" },
+            release: 1,
+            baseUrl: "",
+            onload: () => { console.log("Трек " + id + " загружен"); },
+            onerror: (err) => { 
+                console.warn("Ошибка загрузки сэмпла, используем заглушку");
+                t.sampleLoaded = false;
+            }
+        }).connect(channelVol);
+
+        const newTrack = {
+            name: name + " " + (id + 1),
+            notes: [],
+            inst: sampler,
+            volume: channelVol,
+            filter: channelFilter,
+            meter: meter,
+            volVal: -12,
+            lastScript: "",
+            sampleLoaded: true,
+            currentUrl: ""
+        };
+        tracks.push(newTrack);
+        renderMixer();
+    }
+
+    function renderMixer() {
+        const list = document.getElementById('track-list');
+        list.innerHTML = '';
+        tracks.forEach((t, i) => {
+            const div = document.createElement('div');
+            div.className = `mixer-strip ${i === activeTrackIdx ? 'active' : ''}`;
+            
+            let options = Object.keys(SAMPLE_PRESETS).map(key => 
+                `<option value="${SAMPLE_PRESETS[key]}" ${t.currentUrl === SAMPLE_PRESETS[key] ? 'selected' : ''}>${key}</option>`
+            ).join('');
+
+            div.innerHTML = `
+                <div class="strip-header"><span>CH ${i+1}</span> ${t.name}</div>
+                <select class="btn" style="width:100%; margin-bottom:5px; background:#000; font-size:9px;" 
+                        onchange="changeTrackSample(${i}, this.value)">
+                    <option value="" disabled ${!t.currentUrl ? 'selected' : ''}>-- Выбрать звук --</option>
+                    ${options}
+                </select>
+                <div class="fader-box">
+                    <div class="v-meter"><div class="v-fill" id="meter-${i}"></div></div>
+                    <input type="range" class="fader" min="-60" max="6" value="${t.volVal}" oninput="updateVol(${i}, this.value)">
+                </div>
+                <div style="margin-top: 10px; display: flex; flex-direction: column; gap: 5px;">
+                    <button class="btn" style="width:100%; font-size: 8px; background: #2a2d34;" onclick="triggerSampleLoad(${i})">
+                        ${t.sampleLoaded ? '✅ LOADED' : '📁 LOAD MP3'}
+                    </button>
+                    <input type="file" id="sample-input-${i}" hidden accept="audio/*" onchange="handleSampleFile(event, ${i})">
+                </div>
+            `;
+
+            div.onclick = (e) => { 
+                if (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT' || e.target.tagName === 'BUTTON') return;
+                if (tracks[activeTrackIdx]) tracks[activeTrackIdx].lastScript = document.getElementById('plugin-code').value;
+                activeTrackIdx = i; 
+                renderMixer(); 
+                renderNotes(); 
+                document.getElementById('plugin-code').value = tracks[activeTrackIdx].lastScript || "";
+                updateEditor();
+            };
+            list.appendChild(div);
+        });
+    }
+
+    // Критически важная правка: добавлена принудительная активация контекста
+    function changeTrackSample(idx, url) {
+        if (Tone.context.state !== 'running') Tone.start(); 
+        
+        tracks[idx].currentUrl = url;
+        // Очищаем старые буферы перед загрузкой нового, чтобы избежать зависания памяти
+        tracks[idx].inst.dispose(); 
+        
+        tracks[idx].inst = new Tone.Sampler({
+            urls: { "C4": url },
+            onload: () => { 
+                console.log("Пресет сменен успешно");
+                tracks[idx].sampleLoaded = true;
+                renderMixer();
+            }
+        }).connect(tracks[idx].volume);
+    }
+    function updateVol(i, val) { tracks[i].volVal = val; tracks[i].volume.volume.value = val; }
+    function updateBPM() { Tone.Transport.bpm.value = document.getElementById('bpm').value; }
+
+    function updateMasterFX() {
+        masterFilter.frequency.value = document.getElementById('eq-hi').value;
+        masterFilter.Q.value = document.getElementById('eq-res').value;
+        masterReverb.decay = document.getElementById('rev-size').value;
+        masterReverb.wet.value = document.getElementById('rev-wet').value;
+    }
+    // Функция открытия окна выбора файла
+function triggerSampleLoad(idx) {
+    document.getElementById(`sample-input-${idx}`).click();
+}
+
+// Функция превращения MP3 файла в рабочий инструмент
+async function handleSampleFile(event, idx) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    // Создаем временную ссылку на файл
+    const url = URL.createObjectURL(file);
+    const track = tracks[idx];
+
+    // Привязываем загруженный файл к ноте C4 (базовая нота)
+    // Tone.js сам ускорит файл для высоких нот и замедлит для низких
+    track.inst.add("C4", url, () => {
+        track.sampleLoaded = true;
+        track.name = file.name.substring(0, 10) + "..."; // Обновляем имя трека
+        renderMixer();
+        console.log("Sample loaded successfully into track " + idx);
+    });
+}
+    function initGrid() {
+        const g = document.getElementById('grid');
+        const k = document.getElementById('keys');
+        g.style.gridTemplateColumns = `repeat(${STEPS}, 40px)`;
+        g.innerHTML = ''; k.innerHTML = '';
+        
+        NOTES.forEach((n, i) => {
+            const key = document.createElement('div');
+            key.className = `key ${n.includes('#') ? 'black' : ''}`;
+            key.innerText = n; k.appendChild(key);
+            for (let j = 0; j < STEPS; j++) {
+                const c = document.createElement('div');
+                c.className = 'cell'; c.dataset.row = i; c.dataset.col = j;
+                g.appendChild(c);
+            }
+        });
+    }
+
+    function resizeSong() {
+        STEPS = parseInt(document.getElementById('song-length').value) || 128;
+        initGrid();
+        renderNotes();
+    }
+
+    function handleGridMouseDown(e) {
+        if (!e.target.classList.contains('cell')) return;
+        const row = parseInt(e.target.dataset.row);
+        const col = parseInt(e.target.dataset.col);
+        const len = parseInt(document.getElementById('defaultLen').value);
+        const track = tracks[activeTrackIdx];
+
+        const existingIdx = track.notes.findIndex(n => n.row === row && n.col === col);
+        if (existingIdx === -1) {
+            track.notes.push({ row, col, len });
+            track.inst.triggerAttackRelease(NOTES[row], "8n");
+            renderNotes();
+        }
+    }
+
+    function renderNotes() {
+        document.querySelectorAll('.note-block').forEach(n => n.remove());
+        if (!tracks[activeTrackIdx]) return;
+        
+        tracks[activeTrackIdx].notes.forEach((n, idx) => {
+            const div = document.createElement('div');
+            div.className = 'note-block';
+            div.style.left = (n.col * 40) + 'px';
+            div.style.top = (n.row * 20 + 1) + 'px';
+            div.style.width = (n.len * 40 - 2) + 'px';
+            
+            div.onmousedown = (e) => {
+                e.stopPropagation();
+                const rect = div.getBoundingClientRect();
+                const isResize = (e.clientX - rect.left) > (rect.width - 10);
+                dragState = {
+                    note: n,
+                    idx: idx,
+                    isResize: isResize,
+                    startX: e.clientX,
+                    startY: e.clientY,
+                    origCol: n.col,
+                    origRow: n.row,
+                    origLen: n.len,
+                    hasMoved: false
+                };
+                document.addEventListener('mousemove', onNoteMouseMove);
+                document.addEventListener('mouseup', onNoteMouseUp);
+            };
+            document.getElementById('grid').appendChild(div);
+        });
+    }
+
+    function onNoteMouseMove(e) {
+        if (!dragState) return;
+        const deltaX = e.clientX - dragState.startX;
+        const deltaY = e.clientY - dragState.startY;
+        
+        if (Math.abs(deltaX) > 2 || Math.abs(deltaY) > 2) {
+            dragState.hasMoved = true;
+        }
+
+        if (dragState.isResize) {
+            const stepDelta = Math.round(deltaX / 40);
+            dragState.note.len = Math.max(1, dragState.origLen + stepDelta);
+        } else {
+            const colDelta = Math.round(deltaX / 40);
+            const rowDelta = Math.round(deltaY / 20);
+            dragState.note.col = Math.max(0, Math.min(STEPS - 1, dragState.origCol + colDelta));
+            dragState.note.row = Math.max(0, Math.min(ROWS - 1, dragState.origRow + rowDelta));
+        }
+        renderNotes();
+    }
+
+    function onNoteMouseUp(e) {
+        if (!dragState) return;
+        if (!dragState.hasMoved && !dragState.isResize) {
+            tracks[activeTrackIdx].notes.splice(dragState.idx, 1);
+            renderNotes();
+        }
+        dragState = null;
+        document.removeEventListener('mousemove', onNoteMouseMove);
+        document.removeEventListener('mouseup', onNoteMouseUp);
+    }
+
+    function updateEditor() {
+        let code = document.getElementById('plugin-code').value;
+        code = code.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        document.getElementById('highlighting-code').innerHTML = code;
+        Prism.highlightElement(document.getElementById('highlighting-code'));
+    }
+
+    function syncScroll() {
+        document.getElementById('highlighting-content').scrollTop = document.getElementById('plugin-code').scrollTop;
+        document.getElementById('highlighting-content').scrollLeft = document.getElementById('plugin-code').scrollLeft;
+    }
+
+    function handleTab(e) {
+        if (e.key === 'Tab') {
+            e.preventDefault();
+            let start = e.target.selectionStart;
+            let end = e.target.selectionEnd;
+            e.target.value = e.target.value.substring(0, start) + "    " + e.target.value.substring(end);
+            e.target.selectionStart = e.target.selectionEnd = start + 4;
+            updateEditor();
+        }
+    }
+
+    function runCustomPlugin() {
+        const code = document.getElementById('plugin-code').value;
+        if(tracks[activeTrackIdx]) tracks[activeTrackIdx].lastScript = code;
+        const instr = tracks[activeTrackIdx].inst;
+        try {
+            const pluginFunc = new Function('instr', 'Tone', code);
+            pluginFunc(instr, Tone);
+            console.log("JS Plugin Compiled & Applied to " + tracks[activeTrackIdx].name);
+        } catch (err) {
+            alert("Error in JS Code: " + err.message);
+        }
+    }
+
+    Tone.Transport.scheduleRepeat((time) => {
+        tracks.forEach(t => {
+            t.notes.forEach(note => {
+                if (note.col === currentStep) {
+                    t.inst.triggerAttackRelease(NOTES[note.row], (note.len * 0.25) + "n", time);
+                }
+            });
+        });
+        
+        Tone.Draw.schedule(() => {
+            document.getElementById('playhead').style.transform = `translateX(${currentStep * 40}px)`;
+            tracks.forEach((t, i) => {
+                const level = t.meter.getValue();
+                const height = Math.max(0, (level + 60) * 1.6);
+                const m = document.getElementById(`meter-${i}`);
+                if(m) m.style.height = height + "%";
+            });
+        }, time);
+
+        currentStep++;
+        if (currentStep >= STEPS) {
+            currentStep = 0;
+        }
+    }, "16n");
+
+    function togglePlay() {
+        if (!isPlaying) { 
+            Tone.start(); 
+            updateBPM();
+            Tone.Transport.start(); 
+        } else { 
+            Tone.Transport.stop(); 
+            currentStep = 0; 
+            document.getElementById('playhead').style.transform = `translateX(0px)`;
+        }
+        isPlaying = !isPlaying;
+        document.getElementById('playBtn').innerText = isPlaying ? "■ STOP ENGINE" : "▶ START ENGINE";
+        document.getElementById('playBtn').classList.toggle('active', isPlaying);
+    }
+
+    function drawVisuals() {
+        requestAnimationFrame(drawVisuals);
+        const canvas = document.getElementById('master-visualizer');
+        const ctx = canvas.getContext('2d');
+        const buffer = masterAnalyser.getValue();
+        ctx.clearRect(0,0,180,35);
+        ctx.strokeStyle = '#00ff95';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        for(let i=0; i<buffer.length; i++) {
+            const x = (i/buffer.length)*180;
+            const y = (buffer[i]+1)*17.5;
+            if(i===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+        }
+        ctx.stroke();
+    }
+    let recorder;
+let audioChunks = [];
+let isRecording = false;
+
+async function recordAudio() {
+    if (!isRecording) {
+        // Начинаем запись
+        audioChunks = [];
+        
+        // Подключаем мастер-выход к узлу записи
+        const dest = Tone.getContext().createMediaStreamDestination();
+        masterLimiter.connect(dest); 
+        
+        recorder = new MediaRecorder(dest.stream);
+        
+        recorder.ondataavailable = (evt) => audioChunks.push(evt.data);
+        recorder.onstop = () => {
+            const blob = new Blob(audioChunks, { type: 'audio/webm' }); // Большинство систем откроют это как аудио
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'parrot_render.webm'; // Можно переименовать в .mp3 вручную, многие плееры поймут
+            a.click();
+        };
+
+        recorder.start();
+        if (!isPlaying) togglePlay(); // Запускаем движок, если он стоял
+        
+        isRecording = true;
+        document.getElementById('recordBtn').innerText = "■ STOP & SAVE";
+        document.getElementById('recordBtn').style.background = "#ff0000";
+    } else {
+        // Останавливаем запись
+        recorder.stop();
+        if (isPlaying) togglePlay();
+        
+        isRecording = false;
+        document.getElementById('recordBtn').innerText = "🔴 RECORD TO AUDIO";
+        document.getElementById('recordBtn').style.background = "#4a1010";
+    }
+}
+    async function importMIDI(e) {
+        const file = e.target.files[0];
+        const midi = await Midi.fromUrl(URL.createObjectURL(file));
+        tracks = [];
+        midi.tracks.forEach(t => {
+            if(t.notes.length === 0) return;
+            addNewTrack(t.name || "MIDI Track");
+            const nt = tracks[tracks.length-1];
+            t.notes.forEach(n => {
+                const row = NOTES.indexOf(n.name);
+                const col = Math.round(n.time * (midi.header.tempos[0].bpm/60)*4);
+                const len = Math.round(n.duration * (midi.header.tempos[0].bpm/60)*4) || 1;
+                if(row !== -1) nt.notes.push({ row, col, len });
+            });
+        });
+        let maxCol = 0;
+        tracks.forEach(tr => tr.notes.forEach(n => { if(n.col > maxCol) maxCol = n.col; }));
+        if(maxCol > STEPS) {
+            STEPS = maxCol + 16;
+            document.getElementById('song-length').value = STEPS;
+        }
+        initGrid(); renderMixer(); renderNotes();
+    }
+function saveParrotProject() {
+    if(tracks[activeTrackIdx]) tracks[activeTrackIdx].lastScript = document.getElementById('plugin-code').value;
+    const project = {
+        settings: {
+            bpm: document.getElementById('bpm').value,
+            steps: STEPS,
+            masterFreq: document.getElementById('eq-hi').value,
+            masterRev: document.getElementById('rev-wet').value
+        },
+        tracks: tracks.map(t => ({
+            name: t.name,
+            volVal: t.volVal,
+            notes: t.notes,
+            lastScript: t.lastScript || "",
+            currentUrl: t.currentUrl // Сохраняем ссылку на звук!
+        }))
+    };
+    const blob = new Blob([JSON.stringify(project, null, 2)], {type : 'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = "my_studio_project.parrot";
+    a.click();
+}
+
+async function loadParrotProject(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async function(event) {
+        const project = JSON.parse(event.target.result);
+        STEPS = project.settings.steps;
+        document.getElementById('song-length').value = STEPS;
+        document.getElementById('bpm').value = project.settings.bpm;
+        updateBPM();
+        
+        // Очищаем текущие треки перед загрузкой
+        tracks.forEach(t => t.inst.dispose());
+        tracks = []; 
+
+        for (const tData of project.tracks) {
+            // Создаем трек (addNewTrack вызывает renderMixer внутри)
+            addNewTrack(tData.name.split(' ')[0]); 
+            const t = tracks[tracks.length - 1];
+            t.notes = tData.notes;
+            t.volVal = tData.volVal;
+            t.volume.volume.value = t.volVal;
+            t.lastScript = tData.lastScript || "";
+            
+            // Если в проекте была ссылка на звук — загружаем её
+            if (tData.currentUrl) {
+                changeTrackSample(tracks.length - 1, tData.currentUrl);
+            }
+
+            if (t.lastScript.trim() !== "") {
+                try {
+                    const fn = new Function('instr', 'Tone', t.lastScript);
+                    fn(t.inst, Tone);
+                } catch(err) { console.error("Script load error:", err); }
+            }
+        }
+        initGrid();
+        renderMixer();
+        renderNotes();
+        document.getElementById('plugin-code').value = tracks[activeTrackIdx]?.lastScript || "";
+        updateEditor();
+    };
+    reader.readAsText(file);
+}
+async function exportMIDI() {
+    const mTracks = tracks.map(t => {
+        const track = new MidiWriter.Track();
+        // Добавляем темп в MIDI файл
+        track.setTempo(document.getElementById('bpm').value);
+        
+        t.notes.forEach(n => {
+            track.addEvent(new MidiWriter.NoteEvent({ 
+                pitch: NOTES[n.row], 
+                duration: 'T' + (n.len * 128), 
+                startTick: n.col * 128 
+            }));
+        });
+        return track;
+    });
+
+    const write = new MidiWriter.Writer(mTracks);
+    const midiBase64 = write.buildFile(); // Это Uint8Array
+
+    // Пытаемся вызвать системное окно сохранения (File System Access API)
+    if (window.showSaveFilePicker) {
+        try {
+            const handle = await window.showSaveFilePicker({
+                suggestedName: 'my_composition.mid',
+                types: [{
+                    description: 'MIDI File',
+                    accept: { 'audio/midi': ['.mid'] },
+                }],
+            });
+            const writable = await handle.createWritable();
+            await writable.write(new Blob([write.buildFile()], {type: 'audio/midi'}));
+            await writable.close();
+        } catch (err) {
+            console.log("Сохранение отменено или не поддерживается");
+        }
+    } else {
+        // Запасной вариант для старых браузеров
+        const link = document.createElement('a');
+        link.href = write.dataUri();
+        link.download = 'track.mid';
+        link.click();
+    }
+}
+    addNewTrack("Bass Piano");
+    addNewTrack("Lead Synth");
+    initGrid();
+    drawVisuals();
+    updateMasterFX();
+    updateEditor();
+</script>
+</body>
+</html>

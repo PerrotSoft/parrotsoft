@@ -1,4 +1,3 @@
-// app/console/page.js
 'use client';
 
 import { useState, useTransition } from 'react';

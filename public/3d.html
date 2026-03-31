@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>V-PRO 15.0 BLENDER EDITION | LIGHTS & TEXTURES</title>
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+                "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+            }
+        }
+    </script>
+    <style>
+        :root {
+            --b0: #020202; --b1: #0a0a0a; --b2: #151515; --b3: #1e1e1e;
+            --accent: #ff7300;
+            --accent-bright: #ffa600; 
+            --text: #ffffff; --text-dim: #888;
+            --panel-w: 320px; --header-h: 45px; --footer-h: 110px;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+        body { background: var(--b0); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; font-size: 11px; }
+
+        header { height: var(--header-h); background: var(--b2); border-bottom: 1px solid #000; display: flex; align-items: center; padding: 0 15px; gap: 15px; z-index: 1100; }
+        .logo { font-weight: 900; color: var(--accent); letter-spacing: -1px; font-size: 16px; font-style: italic; }
+        .workspace-tabs { display: flex; gap: 4px; background: #000; padding: 3px; border-radius: 6px; }
+        .tab { padding: 6px 14px; border: none; background: transparent; color: var(--text-dim); cursor: pointer; font-size: 10px; font-weight: 700; border-radius: 4px; text-transform: uppercase; transition: 0.3s; }
+        .tab.active { background: var(--accent); color: #000; }
+        .header-actions { margin-left: auto; display: flex; gap: 8px; }
+
+        #main-layout { flex: 1; display: flex; min-height: 0; position: relative; }
+        .toolbar { width: 50px; background: var(--b1); border-right: 1px solid #000; display: flex; flex-direction: column; align-items: center; padding: 12px 0; gap: 10px; z-index: 1050; }
+        .tool-btn { width: 36px; height: 36px; background: var(--b2); border: 1px solid #333; color: #fff; cursor: pointer; border-radius: 6px; font-size: 16px; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
+        .tool-btn:hover { border-color: var(--accent); background: #1a1a1a; }
+        .tool-btn.active { border-color: var(--accent); color: var(--accent); background: #2b1700; }
+        .tool-sep { height: 1px; width: 25px; background: #333; margin: 4px 0; }
+
+        #viewport-container { flex: 1; position: relative; background: #000; overflow: hidden; }
+        #viewport { width: 100%; height: 100%; outline: none; }
+        #st-fps { position: absolute; top: 15px; left: 15px; color: var(--accent); font-family: monospace; font-size: 11px; pointer-events: none; z-index: 10; text-shadow: 1px 1px 2px #000; }
+        
+        #view-controls { position: absolute; top: 15px; right: 15px; display: flex; gap: 5px; z-index: 10; }
+        
+        #camera-frame { display: none; position: absolute; inset: 0; border: 2px solid var(--accent); pointer-events: none; z-index: 100; box-shadow: inset 0 0 100px rgba(0,0,0,0.8); }
+        #camera-frame::before { content: 'RENDER CAMERA VIEW'; position: absolute; top: 10px; left: 50%; transform: translateX(-50%); color: var(--accent); font-weight: 900; font-size: 10px; background: #000; padding: 2px 10px; }
+
+        .sidebar { width: var(--panel-w); background: var(--b1); border-left: 1px solid #000; display: flex; flex-direction: column; z-index: 1050; box-shadow: -10px 0 30px rgba(0,0,0,0.5); }
+        .side-scroll { flex: 1; overflow-y: auto; overflow-x: hidden; }
+        .section-h { background: var(--b3); padding: 10px 15px; font-size: 10px; text-transform: uppercase; color: var(--accent); font-weight: 900; border-bottom: 1px solid #000; border-top: 1px solid #333; }
+        .prop-box { padding: 15px; border-bottom: 1px solid #1a1a1a; }
+        .prop-row { display: grid; grid-template-columns: 75px 1fr 1fr 1fr; gap: 6px; margin-bottom: 10px; align-items: center; }
+        .prop-row label { color: var(--text-dim); font-size: 9px; font-weight: 800; }
+        input[type="number"], input[type="text"], select { background: #000; border: 1px solid #333; color: var(--accent); padding: 6px; border-radius: 4px; width: 100%; outline: none; font-size: 10px; font-family: monospace; }
+        input[type="range"] { width: 100%; accent-color: var(--accent); }
+        
+        .outliner { height: 150px; background: #050505; margin: 10px; border: 1px solid #222; overflow-y: auto; border-radius: 4px; }
+        .out-item { padding: 8px 12px; border-bottom: 1px solid #111; cursor: pointer; color: #aaa; display: flex; justify-content: space-between; align-items: center; }
+        .out-item:hover { background: #111; color: #fff; }
+        .out-item.active { color: var(--accent); background: #1a1a1a; border-left: 3px solid var(--accent); }
+
+        footer { height: var(--footer-h); background: var(--b1); border-top: 1px solid #000; display: flex; flex-direction: column; z-index: 1100; }
+        .tl-header { height: 40px; border-bottom: 1px solid #000; display: flex; align-items: center; padding: 0 15px; gap: 10px; }
+        .tl-body { flex: 1; position: relative; padding: 10px 20px; background: #050505; }
+        .tl-track { height: 35px; background: #111; border: 1px solid #252525; position: relative; cursor: pointer; border-radius: 4px; }
+        .playhead { position: absolute; top: -5px; bottom: -5px; width: 2px; background: #ff0044; z-index: 10; pointer-events: none; }
+        .key-marker { position: absolute; width: 10px; height: 10px; background: var(--accent); top: 50%; transform: translate(-50%, -50%) rotate(45deg); border: 2px solid #000; }
+
+        .btn { background: var(--b3); border: 1px solid #444; color: #fff; padding: 7px 15px; border-radius: 5px; cursor: pointer; font-size: 10px; font-weight: 700; transition: 0.2s; display: inline-flex; align-items: center; justify-content: center; text-align: center; }
+        .btn:hover { background: #333; border-color: var(--accent); }
+        .btn-primary { background: var(--accent); color: #000; border: none; }
+        .btn-primary:hover { background: var(--accent-bright); }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="logo">V-PRO 15.0</div>
+    <div class="workspace-tabs">
+        <button class="tab active" id="mode-object" onclick="app.setMode('OBJECT')">Object</button>
+        <button class="tab" id="mode-edit" onclick="app.setMode('EDIT')">Edit (Vertex)</button>
+        <button class="tab" id="mode-render" onclick="app.setMode('RENDER')">Render / Cam</button>
+    </div>
+    <div class="header-actions">
+        <button class="btn" onclick="app.exportOBJ()">Export OBJ</button>
+        <label class="btn btn-primary" style="cursor: pointer;">
+            Import Model
+            <input type="file" hidden id="file-import" accept=".glb,.gltf,.obj">
+        </label>
+    </div>
+</header>
+
+<div id="main-layout">
+    <div class="toolbar">
+        <button class="tool-btn active" id="g-translate" onclick="app.setGizmoMode('translate')" title="Translate">✛</button>
+        <button class="tool-btn" id="g-rotate" onclick="app.setGizmoMode('rotate')" title="Rotate">↻</button>
+        <button class="tool-btn" id="g-scale" onclick="app.setGizmoMode('scale')" title="Scale">⤇</button>
+        <div class="tool-sep"></div>
+        <button class="tool-btn" onclick="app.addObject('cube')" title="Add Cube">📦</button>
+        <button class="tool-btn" onclick="app.addObject('sphere')" title="Add Sphere">🌐</button>
+        <button class="tool-btn" onclick="app.addLight('point')" title="Add Light">💡</button>
+        <button class="tool-btn" onclick="app.addSceneCamera()" title="Add Camera">🎥</button>
+    </div>
+
+    <div id="viewport-container">
+        <div id="st-fps">FPS: 60</div>
+        <div id="view-controls">
+            <button class="btn" onclick="app.focusSelected()" title="Focus Camera on Selected (F)">⌖ Focus</button>
+            <button class="btn" onclick="app.resetCamera()" title="Reset Camera View">⟲ Reset Cam</button>
+        </div>
+        <div id="camera-frame"></div>
+        <div id="viewport" tabindex="0"></div>
+    </div>
+
+    <aside class="sidebar">
+        <div class="side-scroll">
+            
+            <div id="panel-object">
+                <div class="section-h">Hierarchy</div>
+                <div class="outliner" id="ui-outliner"></div>
+
+                <div class="section-h">Transform</div>
+                <div class="prop-box">
+                    <div class="prop-row"><label>Loc</label><input type="number" id="tr-px" step="0.1"><input type="number" id="tr-py" step="0.1"><input type="number" id="tr-pz" step="0.1"></div>
+                    <div class="prop-row"><label>Rot</label><input type="number" id="tr-rx" step="1"><input type="number" id="tr-ry" step="1"><input type="number" id="tr-rz" step="1"></div>
+                    <div class="prop-row"><label>Scl</label><input type="number" id="tr-sx" step="0.1"><input type="number" id="tr-sy" step="0.1"><input type="number" id="tr-sz" step="0.1"></div>
+                </div>
+
+                <div id="mat-settings">
+                    <div class="section-h">Material & Textures</div>
+                    <div class="prop-box">
+                        <div class="prop-row" style="grid-template-columns: 80px 1fr;"><label>Color</label><input type="color" id="mat-color" value="#ff7300"></div>
+                        <div class="prop-row" style="grid-template-columns: 80px 1fr; margin-top: 10px;">
+                            <label>Texture</label>
+                            <label class="btn" style="width: 100%; cursor: pointer;">
+                                Load Image
+                                <input type="file" hidden id="file-texture" accept="image/*">
+                            </label>
+                        </div>
+                        <div style="display:flex; justify-content:flex-end; margin-top:5px;">
+                            <button class="btn" style="padding: 4px 8px; font-size: 9px;" onclick="app.removeTexture()">Remove Tex</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="light-settings" style="display: none;">
+                    <div class="section-h">Light Settings</div>
+                    <div class="prop-box">
+                        <div class="prop-row" style="grid-template-columns: 80px 1fr;"><label>Color</label><input type="color" id="light-color" value="#ffffff"></div>
+                        <div class="prop-row" style="grid-template-columns: 80px 1fr;"><label>Intensity</label><input type="range" id="light-intensity" min="0" max="5000" step="10"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="panel-edit" style="display: none;">
+                <div class="section-h">Mesh Tools (Blender)</div>
+                <div class="prop-box" style="display: flex; flex-direction: column; gap: 10px;">
+                    <p style="color:var(--text-dim); font-size:9px;">Select an orange vertex point to move it. Camera damping disabled for precise picking.</p>
+                    <button class="btn btn-primary" onclick="app.subdivideSelected()">⚄ SUBDIVIDE MESH</button>
+                    <p style="color:var(--text-dim); font-size:9px; margin-top: 5px;">Splits every triangle into 4 smaller ones.</p>
+                </div>
+            </div>
+
+            <div id="panel-render" style="display: none;">
+                <div class="section-h">Cameras</div>
+                <div class="prop-box" style="display: flex; gap: 10px; flex-direction: column;">
+                    <button class="btn" onclick="app.cycleCamera()">Cycle Active Camera</button>
+                    <span id="active-cam-label" style="color:var(--accent);">Default Cam</span>
+                </div>
+                <div class="section-h">Rendering Actions</div>
+                <div class="prop-box" style="display: flex; flex-direction: column; gap: 10px;">
+                    <button class="btn btn-primary" style="height: 40px;" onclick="app.renderImage()">📸 CAPTURE PNG</button>
+                    <button class="btn" id="rec-btn" style="height: 40px;" onclick="app.renderVideo()">🎥 RECORD ANIMATION (.WEBM)</button>
+                </div>
+            </div>
+
+        </div>
+    </aside>
+</div>
+
+<footer>
+    <div class="tl-header">
+        <button class="btn" id="play-btn" onclick="app.togglePlayback()">▶ Play</button>
+        <button class="btn" onclick="app.setKeyframe()" style="color: var(--accent); border-color: var(--accent);">◈ Add Keyframe</button>
+        <button class="btn" onclick="app.clearAnimation()">Clear Track</button>
+        <div style="margin-left: auto; display: flex; align-items: center; gap: 10px;">
+            <span style="color: var(--text-dim); font-weight: 800;">FRAME</span>
+            <div id="ui-frame-box" style="background: #000; padding: 4px 12px; border-radius: 4px; border: 1px solid #333; color: var(--accent); font-family: monospace;">0</div>
+        </div>
+    </div>
+    <div class="tl-body">
+        <div class="tl-track" id="ui-track" onclick="app.seek(event)">
+            <div class="playhead" id="ui-playhead"></div>
+        </div>
+    </div>
+</footer>
+
+<script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { TransformControls } from 'three/addons/controls/TransformControls.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+
+    class VProEngine {
+        constructor() {
+            this.init();
+            this.setupUI();
+            this.animate();
+        }
+
+        init() {
+            this.scene = new THREE.Scene();
+            this.scene.background = new THREE.Color(0x0a0a0a);
+
+            const container = document.getElementById('viewport');
+            this.camera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.1, 5000);
+            this.camera.position.set(50, 50, 50);
+
+            this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+            this.renderer.setSize(container.clientWidth, container.clientHeight);
+            this.renderer.setPixelRatio(window.devicePixelRatio);
+            // Включаем тени
+            this.renderer.shadowMap.enabled = true;
+            this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(this.renderer.domElement);
+
+            // Базовый свет
+            this.ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
+            this.scene.add(this.ambientLight);
+
+            this.grid = new THREE.GridHelper(200, 50, 0x222222, 0x111111);
+            this.scene.add(this.grid);
+
+            // УЛУЧШЕННЫЕ КОНТРОЛЫ КАМЕРЫ (Damping, ScreenSpacePanning)
+            this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+            this.controls.enableDamping = true;
+            this.controls.dampingFactor = 0.05;
+            this.controls.screenSpacePanning = true;
+            this.controls.maxDistance = 2000;
+            
+            this.gizmo = new TransformControls(this.camera, this.renderer.domElement);
+            this.gizmo.addEventListener('dragging-changed', e => this.controls.enabled = !e.value);
+            
+            this.gizmo.addEventListener('change', () => {
+                if (this.mode === 'EDIT' && this.selectedVertex && this.selected) {
+                    const idx = this.selectedVertex.userData.index;
+                    const pos = this.selected.geometry.attributes.position;
+                    pos.setXYZ(idx, this.selectedVertex.position.x, this.selectedVertex.position.y, this.selectedVertex.position.z);
+                    pos.needsUpdate = true;
+                    this.selected.geometry.computeVertexNormals();
+                } else if (this.mode === 'OBJECT' && this.selected) {
+                    this.syncUIFromObject();
+                }
+            });
+            this.scene.add(this.gizmo);
+
+            this.objects = [];
+            this.sceneCameras = [];
+            this.lights = [];
+            this.activeCamIndex = -1;
+            
+            this.selected = null;
+            this.selectedVertex = null;
+            this.vertexGroup = new THREE.Group();
+            this.scene.add(this.vertexGroup);
+            
+            this.isPlaying = false;
+            this.frame = 0;
+            this.maxFrames = 250;
+            this.clock = new THREE.Clock();
+            this.animData = new Map();
+
+            this.mode = 'OBJECT';
+            
+            this.renderCam = new THREE.PerspectiveCamera(45, 16/9, 0.1, 2000);
+            this.renderCam.position.set(80, 40, 80);
+            this.renderCam.lookAt(0,0,0);
+
+            // Добавим дефолтный источник света, чтобы было видно тени/материалы
+            this.addLight('directional');
+        }
+
+        setupUI() {
+            window.addEventListener('resize', () => {
+                const c = document.getElementById('viewport');
+                this.camera.aspect = c.clientWidth / c.clientHeight;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(c.clientWidth, c.clientHeight);
+            });
+
+            const vp = document.getElementById('viewport');
+            vp.addEventListener('pointerdown', (e) => this.handleSelection(e));
+            
+            // Горячие клавиши
+            vp.addEventListener('keydown', (e) => {
+                if(e.key.toLowerCase() === 'f') this.focusSelected();
+                if(e.key === 'Delete' || e.key === 'Backspace') this.deleteSelected();
+            });
+
+            document.getElementById('file-import').addEventListener('change', (e) => this.loadModel(e));
+            document.getElementById('file-texture').addEventListener('change', (e) => this.loadTexture(e));
+
+            const inputs = ['tr-px', 'tr-py', 'tr-pz', 'tr-rx', 'tr-ry', 'tr-rz', 'tr-sx', 'tr-sy', 'tr-sz'];
+            inputs.forEach(id => {
+                const el = document.getElementById(id);
+                if(el) el.addEventListener('input', () => this.applyTransformFromUI());
+            });
+
+            document.getElementById('mat-color').addEventListener('input', (e) => {
+                if(this.selected && this.selected.material) {
+                    this.selected.material.color.set(e.target.value);
+                }
+            });
+
+            document.getElementById('light-color').addEventListener('input', (e) => {
+                if(this.selected && this.selected.isLight) {
+                    this.selected.color.set(e.target.value);
+                    if(this.selected.helper) this.selected.helper.update();
+                }
+            });
+
+            document.getElementById('light-intensity').addEventListener('input', (e) => {
+                if(this.selected && this.selected.isLight) {
+                    this.selected.intensity = parseFloat(e.target.value);
+                }
+            });
+        }
+
+        focusSelected() {
+            if (this.selected && this.mode === 'OBJECT') {
+                this.controls.target.copy(this.selected.position);
+            } else if (this.selectedVertex && this.mode === 'EDIT') {
+                this.controls.target.copy(this.selectedVertex.position);
+            }
+            this.controls.update();
+        }
+
+        resetCamera() {
+            this.controls.target.set(0,0,0);
+            this.camera.position.set(50,50,50);
+            this.controls.update();
+        }
+
+        loadModel(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const url = URL.createObjectURL(file);
+            const ext = file.name.split('.').pop().toLowerCase();
+
+            const onLoad = (obj) => {
+                const model = obj.scene || obj;
+                model.name = file.name;
+                
+                model.traverse(child => {
+                    if (child.isMesh) {
+                        child.geometry = child.geometry.toNonIndexed();
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+                        this.objects.push(child);
+                    }
+                });
+
+                this.scene.add(model);
+                if(!model.isMesh) this.objects.push(model);
+                this.updateOutliner();
+            };
+
+            if (ext === 'glb' || ext === 'gltf') new GLTFLoader().load(url, onLoad);
+            else if (ext === 'obj') new OBJLoader().load(url, onLoad);
+        }
+
+        loadTexture(e) {
+            if(!this.selected || !this.selected.isMesh) return;
+            const file = e.target.files[0];
+            if(!file) return;
+            const url = URL.createObjectURL(file);
+            const tex = new THREE.TextureLoader().load(url);
+            tex.colorSpace = THREE.SRGBColorSpace;
+            this.selected.material.map = tex;
+            this.selected.material.needsUpdate = true;
+            e.target.value = ''; // reset
+        }
+
+        removeTexture() {
+            if(!this.selected || !this.selected.isMesh) return;
+            this.selected.material.map = null;
+            this.selected.material.needsUpdate = true;
+        }
+
+        setMode(m) {
+            this.mode = m;
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.getElementById(`mode-${m.toLowerCase()}`).classList.add('active');
+
+            const pObj = document.getElementById('panel-object');
+            const pEdit = document.getElementById('panel-edit');
+            const pRen = document.getElementById('panel-render');
+            const camFrame = document.getElementById('camera-frame');
+
+            this.vertexGroup.clear();
+            this.selectedVertex = null;
+
+            if (m === 'RENDER') {
+                pObj.style.display = 'none'; pEdit.style.display = 'none'; pRen.style.display = 'block'; 
+                camFrame.style.display = 'block'; this.grid.visible = false; this.gizmo.detach();
+                this.controls.enableDamping = true;
+            } else if (m === 'EDIT') {
+                pObj.style.display = 'none'; pEdit.style.display = 'block'; pRen.style.display = 'none'; 
+                camFrame.style.display = 'none'; this.grid.visible = true; this.gizmo.detach();
+                this.controls.enableDamping = false; // Отключаем демпинг для точного клика по вершинам
+                this.buildVertexHelpers();
+            } else {
+                pObj.style.display = 'block'; pEdit.style.display = 'none'; pRen.style.display = 'none'; 
+                camFrame.style.display = 'none'; this.grid.visible = true;
+                this.controls.enableDamping = true;
+                if (this.selected) this.gizmo.attach(this.selected);
+            }
+        }
+
+        subdivideSelected() {
+            if (!this.selected || !this.selected.isMesh || this.mode !== 'EDIT') return;
+
+            const geom = this.selected.geometry;
+            if (!geom.index) {
+                const pos = geom.attributes.position.array;
+                const newPos = [];
+                for (let i = 0; i < pos.length; i += 9) {
+                    const v0 = new THREE.Vector3(pos[i], pos[i+1], pos[i+2]);
+                    const v1 = new THREE.Vector3(pos[i+3], pos[i+4], pos[i+5]);
+                    const v2 = new THREE.Vector3(pos[i+6], pos[i+7], pos[i+8]);
+
+                    const m01 = v0.clone().lerp(v1, 0.5);
+                    const m12 = v1.clone().lerp(v2, 0.5);
+                    const m20 = v2.clone().lerp(v0, 0.5);
+
+                    newPos.push(v0.x, v0.y, v0.z, m01.x, m01.y, m01.z, m20.x, m20.y, m20.z);
+                    newPos.push(m01.x, m01.y, m01.z, v1.x, v1.y, v1.z, m12.x, m12.y, m12.z);
+                    newPos.push(m20.x, m20.y, m20.z, m12.x, m12.y, m12.z, v2.x, v2.y, v2.z);
+                    newPos.push(m01.x, m01.y, m01.z, m12.x, m12.y, m12.z, m20.x, m20.y, m20.z);
+                }
+
+                const newGeom = new THREE.BufferGeometry();
+                newGeom.setAttribute('position', new THREE.Float32BufferAttribute(newPos, 3));
+                newGeom.computeVertexNormals();
+                
+                // Переносим UV если были
+                if(geom.attributes.uv) {
+                     // Упрощенно: без UV интерполяции в этом базовом сэмпле (иначе текстуры сломаются на subdivide)
+                }
+
+                this.selected.geometry.dispose();
+                this.selected.geometry = newGeom;
+                this.buildVertexHelpers(); 
+            }
+        }
+
+        buildVertexHelpers() {
+            this.vertexGroup.clear();
+            if (!this.selected || !this.selected.isMesh) return;
+            
+            const pos = this.selected.geometry.attributes.position;
+            // Улучшенные хелперы вершин: маленькие сферы
+            const mat = new THREE.MeshBasicMaterial({ color: 0xffa600, depthTest: false });
+            const geo = new THREE.SphereGeometry(0.4, 8, 8); // Увеличен размер, изменена форма
+
+            for (let i = 0; i < pos.count; i++) {
+                const helper = new THREE.Mesh(geo, mat);
+                helper.position.fromBufferAttribute(pos, i);
+                helper.position.applyMatrix4(this.selected.matrixWorld);
+                helper.userData = { isVertex: true, index: i, parentMesh: this.selected };
+                this.vertexGroup.add(helper);
+            }
+        }
+
+        addObject(type) {
+            const geo = type === 'cube' ? new THREE.BoxGeometry(10,10,10).toNonIndexed() : new THREE.SphereGeometry(8,16,16).toNonIndexed();
+            const mat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.5, metalness: 0.1 });
+            const mesh = new THREE.Mesh(geo, mat);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            mesh.name = `${type.toUpperCase()}_${this.objects.length}`;
+            this.scene.add(mesh);
+            this.objects.push(mesh);
+            this.selectObject(mesh);
+            this.updateOutliner();
+        }
+
+        addLight(type) {
+            let light, helper;
+            if(type === 'point') {
+                light = new THREE.PointLight(0xffffff, 500, 100);
+                light.position.set(0, 20, 0);
+                helper = new THREE.PointLightHelper(light, 2);
+            } else {
+                light = new THREE.DirectionalLight(0xffffff, 2);
+                light.position.set(20, 50, 20);
+                helper = new THREE.DirectionalLightHelper(light, 5);
+            }
+            
+            light.castShadow = true;
+            light.name = `Light_${this.lights.length + 1}`;
+            light.isLight = true;
+            light.helper = helper;
+
+            this.scene.add(light);
+            this.scene.add(helper);
+            
+            this.lights.push(light);
+            this.objects.push(light);
+            this.selectObject(light);
+            this.updateOutliner();
+        }
+
+        addSceneCamera() {
+            const cam = new THREE.PerspectiveCamera(50, 16/9, 0.1, 2000);
+            cam.position.copy(this.camera.position);
+            cam.rotation.copy(this.camera.rotation);
+            cam.name = `Camera_${this.sceneCameras.length + 1}`;
+            
+            const helper = new THREE.CameraHelper(cam);
+            this.scene.add(cam);
+            this.scene.add(helper);
+            
+            this.sceneCameras.push(cam);
+            this.objects.push(cam);
+            this.activeCamIndex = this.sceneCameras.length - 1;
+            
+            this.updateOutliner();
+            document.getElementById('active-cam-label').innerText = cam.name;
+        }
+
+        cycleCamera() {
+            if (this.sceneCameras.length === 0) return;
+            this.activeCamIndex = (this.activeCamIndex + 1) % this.sceneCameras.length;
+            this.renderCam = this.sceneCameras[this.activeCamIndex];
+            document.getElementById('active-cam-label').innerText = this.renderCam.name;
+        }
+
+        selectObject(obj) {
+            if (this.mode === 'EDIT' && obj.userData.isVertex) {
+                this.selectedVertex = obj;
+                this.gizmo.attach(obj);
+                return;
+            }
+
+            this.selected = obj;
+            
+            if (this.mode === 'OBJECT') {
+                this.gizmo.attach(obj);
+                this.syncUIFromObject();
+                this.drawKeys();
+            }
+            if (this.mode === 'EDIT') this.buildVertexHelpers();
+            this.updateOutliner();
+        }
+
+        handleSelection(e) {
+            document.getElementById('viewport').focus();
+            const rect = this.renderer.domElement.getBoundingClientRect();
+            const mouse = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
+            
+            // Расширяем зону клика для Raycaster
+            const ray = new THREE.Raycaster();
+            ray.params.Points.threshold = 1; 
+            ray.params.Line.threshold = 1;
+            ray.setFromCamera(mouse, this.camera);
+            
+            let hits = [];
+            if (this.mode === 'EDIT') hits = ray.intersectObjects(this.vertexGroup.children, false);
+            else hits = ray.intersectObjects(this.objects, true);
+            
+            if (hits.length > 0) {
+                let target = hits[0].object;
+                while(target.parent && !this.objects.includes(target) && !target.userData.isVertex) target = target.parent;
+                this.selectObject(target);
+            } else if (this.mode === 'OBJECT' && !this.gizmo.dragging) {
+                this.gizmo.detach();
+                this.selected = null;
+                this.updateOutliner();
+                this.syncUIFromObject();
+            }
+        }
+
+        deleteSelected() {
+            if(!this.selected || this.mode === 'EDIT') return;
+            this.gizmo.detach();
+            this.scene.remove(this.selected);
+            if(this.selected.helper) this.scene.remove(this.selected.helper);
+            this.objects = this.objects.filter(o => o !== this.selected);
+            this.selected = null;
+            this.updateOutliner();
+        }
+
+        setGizmoMode(m) {
+            this.gizmo.setMode(m);
+            document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
+            document.getElementById(`g-${m}`).classList.add('active');
+        }
+
+        syncUIFromObject() {
+            const matPanel = document.getElementById('mat-settings');
+            const lightPanel = document.getElementById('light-settings');
+
+            if(!this.selected || this.selected.userData.isVertex) {
+                matPanel.style.display = 'none';
+                lightPanel.style.display = 'none';
+                return;
+            }
+
+            const s = this.selected;
+            
+            // Transform
+            if(document.getElementById('tr-px')) {
+                document.getElementById('tr-px').value = s.position.x.toFixed(2);
+                document.getElementById('tr-py').value = s.position.y.toFixed(2);
+                document.getElementById('tr-pz').value = s.position.z.toFixed(2);
+                document.getElementById('tr-rx').value = THREE.MathUtils.radToDeg(s.rotation.x).toFixed(0);
+                document.getElementById('tr-ry').value = THREE.MathUtils.radToDeg(s.rotation.y).toFixed(0);
+                document.getElementById('tr-rz').value = THREE.MathUtils.radToDeg(s.rotation.z).toFixed(0);
+                document.getElementById('tr-sx').value = s.scale.x.toFixed(2);
+                document.getElementById('tr-sy').value = s.scale.y.toFixed(2);
+                document.getElementById('tr-sz').value = s.scale.z.toFixed(2);
+            }
+
+            // Panels
+            if(s.isMesh && s.material) {
+                matPanel.style.display = 'block'; lightPanel.style.display = 'none';
+                document.getElementById('mat-color').value = '#' + s.material.color.getHexString();
+            } else if(s.isLight) {
+                matPanel.style.display = 'none'; lightPanel.style.display = 'block';
+                document.getElementById('light-color').value = '#' + s.color.getHexString();
+                document.getElementById('light-intensity').value = s.intensity;
+            } else {
+                matPanel.style.display = 'none'; lightPanel.style.display = 'none';
+            }
+        }
+
+        applyTransformFromUI() {
+            if(!this.selected || this.selected.userData.isVertex) return;
+            const s = this.selected;
+            s.position.set(parseFloat(document.getElementById('tr-px').value), parseFloat(document.getElementById('tr-py').value), parseFloat(document.getElementById('tr-pz').value));
+            s.rotation.set(THREE.MathUtils.degToRad(parseFloat(document.getElementById('tr-rx').value)), THREE.MathUtils.degToRad(parseFloat(document.getElementById('tr-ry').value)), THREE.MathUtils.degToRad(parseFloat(document.getElementById('tr-rz').value)));
+            s.scale.set(parseFloat(document.getElementById('tr-sx').value), parseFloat(document.getElementById('tr-sy').value), parseFloat(document.getElementById('tr-sz').value));
+        }
+
+        updateOutliner() {
+            const out = document.getElementById('ui-outliner');
+            out.innerHTML = '';
+            this.objects.forEach(o => {
+                if(o.userData.isVertex) return;
+                const div = document.createElement('div');
+                div.className = `out-item ${this.selected === o ? 'active' : ''}`;
+                div.innerHTML = `<span>${o.name || o.type}</span>`;
+                div.onclick = (e) => { e.stopPropagation(); this.selectObject(o); };
+                out.appendChild(div);
+            });
+        }
+
+        togglePlayback() {
+            this.isPlaying = !this.isPlaying;
+            document.getElementById('play-btn').innerText = this.isPlaying ? '⏸ Pause' : '▶ Play';
+        }
+
+        seek(e) {
+            const rect = document.getElementById('ui-track').getBoundingClientRect();
+            const p = (e.clientX - rect.left) / rect.width;
+            this.frame = p * this.maxFrames;
+            this.updateFrame();
+        }
+
+        setKeyframe() {
+            if(!this.selected || this.selected.userData.isVertex) return;
+            const id = this.selected.uuid;
+            if(!this.animData.has(id)) this.animData.set(id, new Map());
+            
+            const f = Math.floor(this.frame);
+            this.animData.get(id).set(f, { p: this.selected.position.clone(), q: this.selected.quaternion.clone(), s: this.selected.scale.clone() });
+            this.drawKeys();
+        }
+
+        updateFrame() {
+            const f = Math.floor(this.frame);
+            document.getElementById('ui-playhead').style.left = `${(this.frame / this.maxFrames) * 100}%`;
+            document.getElementById('ui-frame-box').innerText = f;
+
+            this.objects.forEach(obj => {
+                const keys = this.animData.get(obj.uuid);
+                if(!keys || keys.size === 0) return;
+
+                const sorted = Array.from(keys.keys()).sort((a,b) => a-b);
+                let next = sorted.find(k => k >= f);
+                let prev = [...sorted].reverse().find(k => k <= f);
+
+                if(prev !== undefined && next !== undefined && prev !== next) {
+                    const t = (f - prev) / (next - prev);
+                    obj.position.lerpVectors(keys.get(prev).p, keys.get(next).p, t);
+                    obj.quaternion.slerpQuaternions(keys.get(prev).q, keys.get(next).q, t);
+                    obj.scale.lerpVectors(keys.get(prev).s, keys.get(next).s, t);
+                } else if (prev !== undefined) {
+                    obj.position.copy(keys.get(prev).p);
+                    obj.quaternion.copy(keys.get(prev).q);
+                    obj.scale.copy(keys.get(prev).s);
+                }
+            });
+            if (this.mode === 'OBJECT') this.syncUIFromObject();
+        }
+
+        drawKeys() {
+            const track = document.getElementById('ui-track');
+            document.querySelectorAll('.key-marker').forEach(m => m.remove());
+            if(!this.selected || !this.animData.has(this.selected.uuid)) return;
+            
+            const keys = this.animData.get(this.selected.uuid);
+            for(let f of keys.keys()) {
+                const marker = document.createElement('div');
+                marker.className = 'key-marker';
+                marker.style.left = `${(f / this.maxFrames) * 100}%`;
+                track.appendChild(marker);
+            }
+        }
+
+        clearAnimation() {
+            if(!this.selected) return;
+            this.animData.delete(this.selected.uuid);
+            this.drawKeys();
+        }
+
+        exportOBJ() {
+            let objContent = "# V-PRO 15.0 EXPORT\n";
+            let vertOffset = 1;
+
+            this.objects.forEach(mesh => {
+                if(!mesh.geometry || !mesh.isMesh) return;
+                objContent += `o ${mesh.name}\n`;
+                const pos = mesh.geometry.attributes.position;
+                const matrix = mesh.matrixWorld;
+
+                for(let i = 0; i < pos.count; i++) {
+                    const v = new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(matrix);
+                    objContent += `v ${v.x.toFixed(4)} ${v.y.toFixed(4)} ${v.z.toFixed(4)}\n`;
+                }
+
+                for(let i = 1; i <= pos.count; i += 3) {
+                    objContent += `f ${i+vertOffset-1} ${i+vertOffset} ${i+vertOffset+1}\n`;
+                }
+                vertOffset += pos.count;
+            });
+
+            const blob = new Blob([objContent], {type: 'text/plain'});
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = "blender_scene.obj";
+            a.click();
+        }
+
+        renderImage() {
+            const currentCam = this.activeCamIndex >= 0 ? this.sceneCameras[this.activeCamIndex] : this.renderCam;
+            this.renderer.render(this.scene, currentCam);
+            const a = document.createElement('a');
+            a.href = this.renderer.domElement.toDataURL("image/png");
+            a.download = "render.png";
+            a.click();
+        }
+
+        async renderVideo() {
+            const btn = document.getElementById('rec-btn');
+            const stream = this.renderer.domElement.captureStream(30);
+            const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+            const chunks = [];
+
+            recorder.ondataavailable = e => chunks.push(e.data);
+            recorder.onstop = () => {
+                const blob = new Blob(chunks, { type: 'video/webm' });
+                const a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = "animation.webm";
+                a.click();
+                btn.innerText = "🎥 RECORD ANIMATION (.WEBM)";
+                this.isPlaying = false;
+            };
+
+            this.frame = 0;
+            this.isPlaying = true;
+            recorder.start();
+            btn.innerText = "🔴 RECORDING...";
+            setTimeout(() => recorder.stop(), 5000);
+        }
+
+        animate() {
+            requestAnimationFrame(() => this.animate());
+            const dt = this.clock.getDelta();
+
+            if (this.mode === 'EDIT' && this.selected && this.selected.isMesh && !this.selectedVertex) {
+                const pos = this.selected.geometry.attributes.position;
+                this.vertexGroup.children.forEach((helper, i) => {
+                    helper.position.fromBufferAttribute(pos, i).applyMatrix4(this.selected.matrixWorld);
+                });
+            }
+
+            if(this.isPlaying) {
+                this.frame += 1;
+                if(this.frame > this.maxFrames) this.frame = 0;
+                this.updateFrame();
+            }
+
+            if (this.controls.enableDamping) this.controls.update();
+
+            const cam = (this.mode === 'RENDER' && this.activeCamIndex >= 0) ? this.sceneCameras[this.activeCamIndex] : (this.mode === 'RENDER' ? this.renderCam : this.camera);
+            this.renderer.render(this.scene, cam);
+
+            document.getElementById('st-fps').innerText = `FPS: ${Math.round(1/dt)}`;
+        }
+    }
+
+    window.app = new VProEngine();
+</script>
+</body>
+</html>

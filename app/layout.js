@@ -2,16 +2,13 @@ import './globals.css';
 import ClientInterface from './ClientInterface';
 import { createClient } from '@libsql/client';
 
-// Инициализируем клиент вне функций для повторного использования
 const client = createClient({
-  // Мы убираем process.env и оставляем только прямые строки
   url: "libsql://parrotsoft-vercel-icfg-i713yoki8d1eytlkyrwlsfzr.aws-us-east-1.turso.io",
   authToken: "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NzEzNjM2NjIsImlkIjoiN2YyYTY2MDgtYWZjOC00MTQ1LWFlNmYtZDljMDhkZGRhZWE3IiwicmlkIjoiZDU5ZjM3ZTYtZGE5YS00YTA2LTk4OWYtMTBhYTRjNWFmOTViIn0.V6NDZo1wMJNNs5ipc40YkuTCXqG4DwijLBkqtDbr-6_uJa1xCJvHPOvE3jeK2UOfTBtc-cD8SZ0s3tqALRuABA",
 });
 
 async function ensureTables() {
   try {
-    // Используем простой execute, так как CREATE TABLE обычно не вызывает проблем с потоками
     await client.execute(`CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, data TEXT)`);
   } catch (e) {
     console.error("Database init error:", e);
@@ -88,12 +85,10 @@ export async function getUserFiles(username) {
 }
 
 export default async function RootLayout({ children }) {
-  // Выполняем инициализацию таблиц
   await ensureTables();
   
   let users = {};
   try {
-    // Получаем данные всех пользователей для начальной загрузки интерфейса
     const rs = await client.execute("SELECT username, data FROM users");
     if (rs.rows) {
       rs.rows.forEach(row => {
@@ -101,7 +96,6 @@ export default async function RootLayout({ children }) {
       });
     }
   } catch (e) {
-    // В случае ошибки (например, resp.body?.cancel) возвращаем пустой объект, чтобы билд не падал
     console.error("RootLayout fetch error (ignoring for build):", e);
   }
 

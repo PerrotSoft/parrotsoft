@@ -1,0 +1,286 @@
+<html lang="ru"><head><style>body {transition: opacity ease-in 0.2s; } 
+body[unresolved] {opacity: 0; display: block; overflow: hidden; position: relative; } 
+</style>
+  <meta charset="UTF-8">
+  <title>ParrotSoft — Каталог приложений</title>
+      <link rel="icon" href="img/ico.ico" type="image/x-icon">
+        <script src="https://pagead2.googlesyndication.com/pagead/managed/js/adsense/m202603230101/show_ads_impl_fy2021.js"></script><script src="js/sitefun.js" type="module"></script>
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+        <link rel="stylesheet" href="css/style1.css">
+  <style>
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background-image: url("img/fone.png");
+      background-repeat: no-repeat; /* Запрет повторения изображения */
+    background-size: cover; /* Растянуть изображение на весь экран */
+    background-position: center center; /* Центрировать изображение */
+    background-attachment: fixed; /* Закрепить фон при прокрутке (опционально) */
+    }
+
+    header {
+      background: linear-gradient(90deg, #1e1e1e, #2a2a2a);
+      padding: 20px;
+      text-align: center;
+      font-size: 28px;
+      font-weight: bold;
+      color: #00c853;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.6);
+    }
+
+    .search-bar {
+      text-align: center;
+      margin: 20px;
+    }
+
+    .search-bar input {
+      width: 300px;
+      padding: 10px;
+      border-radius: 8px;
+      border: none;
+      font-size: 16px;
+    }
+
+    .apps-container {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 20px;
+      padding: 20px;
+    }
+
+    .app-card {
+      background: #ffffffe3;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+      padding: 20px;
+      text-align: center;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+
+    .app-card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 6px 16px rgba(0, 0, 0, 0.7);
+    }
+
+    .app-card img {
+      width: 90px;
+      height: 90px;
+      border-radius: 20%;
+      margin-bottom: 15px;
+    }
+
+    .app-title {
+      font-size: 20px;
+      font-weight: bold;
+      margin: 10px 0 5px;
+      color: #00e676;
+    }
+
+    .app-desc {
+      font-size: 14px;
+      margin-bottom: 15px;
+      min-height: 40px;
+    }
+
+    .buttons {
+      display: flex;
+      justify-content: space-around;
+    }
+
+    .buttons button {
+      border: none;
+      padding: 8px 14px;
+      border-radius: 6px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .buttons button:hover {
+      background: #009624;
+    }
+
+    /* Popup */
+    .popup {
+      display: none;
+      position: fixed;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+      background: rgba(116, 116, 116, 0.586);
+      justify-content: center;
+      align-items: center;
+      z-index: 1000;
+    }
+    .popup-content {
+      background: #e5e5e5;
+      padding: 20px;
+      border-radius: 12px;
+      max-width: 500px;
+      width: 90%;
+      text-align: center;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.7);
+    }
+
+    .popup-content h2 {
+      margin-top: 0;
+      color: #028344;
+    }
+    .popup-content button {
+      margin-top: 20px;
+      background: #f44336;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .popup-content button:hover {
+      background: #c62828;
+    }
+  </style>
+<meta http-equiv="origin-trial" content="AlK2UR5SkAlj8jjdEc9p3F3xuFYlF6LYjAML3EOqw1g26eCwWPjdmecULvBH5MVPoqKYrOfPhYVL71xAXI1IBQoAAAB8eyJvcmlnaW4iOiJodHRwczovL2RvdWJsZWNsaWNrLm5ldDo0NDMiLCJmZWF0dXJlIjoiV2ViVmlld1hSZXF1ZXN0ZWRXaXRoRGVwcmVjYXRpb24iLCJleHBpcnkiOjE3NTgwNjcxOTksImlzU3ViZG9tYWluIjp0cnVlfQ=="><meta http-equiv="origin-trial" content="Amm8/NmvvQfhwCib6I7ZsmUxiSCfOxWxHayJwyU1r3gRIItzr7bNQid6O8ZYaE1GSQTa69WwhPC9flq/oYkRBwsAAACCeyJvcmlnaW4iOiJodHRwczovL2dvb2dsZXN5bmRpY2F0aW9uLmNvbTo0NDMiLCJmZWF0dXJlIjoiV2ViVmlld1hSZXF1ZXN0ZWRXaXRoRGVwcmVjYXRpb24iLCJleHBpcnkiOjE3NTgwNjcxOTksImlzU3ViZG9tYWluIjp0cnVlfQ=="><meta http-equiv="origin-trial" content="A9nrunKdU5m96PSN1XsSGr3qOP0lvPFUB2AiAylCDlN5DTl17uDFkpQuHj1AFtgWLxpLaiBZuhrtb2WOu7ofHwEAAACKeyJvcmlnaW4iOiJodHRwczovL2RvdWJsZWNsaWNrLm5ldDo0NDMiLCJmZWF0dXJlIjoiQUlQcm9tcHRBUElNdWx0aW1vZGFsSW5wdXQiLCJleHBpcnkiOjE3NzQzMTA0MDAsImlzU3ViZG9tYWluIjp0cnVlLCJpc1RoaXJkUGFydHkiOnRydWV9"><meta http-equiv="origin-trial" content="A93bovR+QVXNx2/38qDbmeYYf1wdte9EO37K9eMq3r+541qo0byhYU899BhPB7Cv9QqD7wIbR1B6OAc9kEfYCA4AAACQeyJvcmlnaW4iOiJodHRwczovL2dvb2dsZXN5bmRpY2F0aW9uLmNvbTo0NDMiLCJmZWF0dXJlIjoiQUlQcm9tcHRBUElNdWx0aW1vZGFsSW5wdXQiLCJleHBpcnkiOjE3NzQzMTA0MDAsImlzU3ViZG9tYWluIjp0cnVlLCJpc1RoaXJkUGFydHkiOnRydWV9"><meta http-equiv="origin-trial" content="A1S5fojrAunSDrFbD8OfGmFHdRFZymSM/1ss3G+NEttCLfHkXvlcF6LGLH8Mo5PakLO1sCASXU1/gQf6XGuTBgwAAACQeyJvcmlnaW4iOiJodHRwczovL2dvb2dsZXRhZ3NlcnZpY2VzLmNvbTo0NDMiLCJmZWF0dXJlIjoiQUlQcm9tcHRBUElNdWx0aW1vZGFsSW5wdXQiLCJleHBpcnkiOjE3NzQzMTA0MDAsImlzU3ViZG9tYWluIjp0cnVlLCJpc1RoaXJkUGFydHkiOnRydWV9"><style>[_nghost-ng-c2697620354]{font-family:Open Sans,sans-serif;color:#121212}</style></head>
+<body>
+  <div class="search-bar">
+    <input type="text" id="searchInput" placeholder="🔍 Поиск приложений..." onkeyup="searchApps()">
+  </div>
+
+  <div class="apps-container" id="appsList">
+    <!-- Приложение 1 -->
+    <div class="app-card" data-name="site">
+      <img src="img/ico.png" alt="Home">
+      <div class="app-title">ParrotSoft site legacy</div>
+      <div class="app-desc">Home page of all ParrotSoft services.</div>
+      <div class="buttons">
+        <button onclick="openApp('https://perrotsoft.github.io/')">Open</button>
+        <button onclick="showDetails('ParrotSoft Site','This is the ParrotSoft site, where all services and news are collected.')">Read more</button>
+      </div>
+    </div>
+    <div class="app-card" data-name="site">
+      <img src="img/ico.png" alt="Home">
+      <div class="app-title">ParrotSoft site</div>
+      <div class="app-desc">Home page of all ParrotSoft services.</div>
+      <div class="buttons">
+        <button onclick="openApp('/')">Open</button>
+        <button onclick="showDetails('ParrotSoft Site','This is the ParrotSoft site, where all services and news are collected.')">Read more</button>
+      </div>
+    </div>
+
+
+    <!-- Приложение 2 -->
+    <div class="app-card" data-name="ParrotOS Installer">
+      <img src="img/ico.png" alt="ParrotOS Installer">
+      <div class="app-title">ParrotOS Installer</div>
+      <div class="app-desc">site for installing and downloading ParrotOS.</div>
+      <div class="buttons">
+        <button onclick="openApp('https://perrotsoft.github.io/ParrotOS_Instaler/')">Open</button>
+        <button onclick="showDetails('ParrotOS Installer','Allows you to install and download ParrotOS on your computer or device.')">Read more</button>
+      </div>
+    </div>
+
+    <!-- Приложение 3 -->
+    <div class="app-card" data-name="WavyChatApp">
+      <img src="https://wavychatapp.github.io/WavyChatApp.ico" alt="WavyChatApp">
+      <div class="app-title">WavyChatApp</div>
+      <div class="app-desc">Messenger WavyChatApp</div>
+      <div class="buttons">
+        <button onclick="openApp('https://wavychatapp.github.io/')">Open</button>
+        <button onclick="showDetails('WavyChatApp','The best messenger in the world is WavyChatApp.')">Read more</button>
+      </div>
+    </div>
+
+
+    <!-- Приложение 5 -->
+    <div class="app-card" data-name="DataPedia">
+      <img src="img/datapedia icon.png" alt="DataPedia">
+      <div class="app-title">DataPedia</div>
+      <div class="app-desc">Encyclopedia of data and knowledge.</div>
+      <div class="buttons">
+        <button onclick="openApp('datapedia')">Open</button>
+        <button onclick="showDetails('DataPedia','A knowledge base and encyclopedia for ParrotSoft projects and the community.')">Read more</button>
+      </div>
+    </div>
+    <div class="app-card" data-name="Pblend3D">
+      <img src="img/datapedia icon1.png" alt="Pblend3D">
+      <div class="app-title">Pblend3D</div>
+      <div class="app-desc">Pblend3D 3D Paint</div>
+      <div class="buttons">
+        <button onclick="openApp('https://perrotsoft.github.io/Pblend3D')">Open</button>
+        <button onclick="showDetails('Pblend3D','Pblend3D 3D Module Paint')">Read more</button>
+      </div>
+    </div>
+  <div class="app-card" data-name="WEBOS">
+      <img src="img/datapedia icon1.png" alt="WEBOS">
+      <div class="app-title">WEBOS</div>
+      <div class="app-desc">WEBOS</div>
+      <div class="buttons">
+        <button onclick="openApp('https://perrotsoft.github.io/WEBOS')">Open</button>
+        <button onclick="showDetails('WEBOS','WEBOS - WEB Brouser OS')">Read more</button>
+      </div>
+    </div>
+  <div class="app-card" data-name="PEngen-Web">
+      <img src="https://perrotsoft.github.io/PEngen-Web/ico-engen.png" alt="PEngen-Web">
+      <div class="app-title">PEngen-Web</div>
+      <div class="app-desc">PEngen-Web Game Engen</div>
+      <div class="buttons">
+        <button onclick="openApp('https://perrotsoft.github.io/PEngen-Web')">Open</button>
+        <button onclick="showDetails('PEngen-Web','PEngen-Web - WEB 2D Game Engen')">Read more</button>
+      </div>
+    </div>
+  <div class="app-card" data-name="PEngenAPI">
+      <img src="https://perrotsoft.github.io/PEngenAPI/ico-engen.ico" alt="PEngenAPI">
+      <div class="app-title">PEngenAPI</div>
+      <div class="app-desc">PEngenAPI Game Engen</div>
+      <div class="buttons">
+        <button onclick="openApp('https://perrotsoft.github.io/PEngenAPI')">Open</button>
+        <button onclick="showDetails('PEngenAPI','PEngenAPI - 2D Game Engen')">Read more</button>
+      </div>
+    </div>
+  </div>
+  
+
+  <!-- Popup -->
+  <div class="popup" id="popup">
+    <div class="popup-content">
+      <h2 id="popupTitle"></h2>
+      <p id="popupText"></p>
+      <button onclick="closePopup()">Close</button>
+    </div>
+  </div>
+
+    </div>
+    
+    <div style="height: 100px;margin-top: 100px;"></div>
+  <script>
+    function openApp(url) {
+      window.location.href = url;
+    }
+
+    function showDetails(title, text) {
+      document.getElementById('popupTitle').innerText = title;
+      document.getElementById('popupText').innerText = text;
+      document.getElementById('popup').style.display = 'flex';
+    }
+
+    function closePopup() {
+      document.getElementById('popup').style.display = 'none';
+    }
+
+    function searchApps() {
+      let input = document.getElementById('searchInput').value.toLowerCase();
+      let apps = document.querySelectorAll('.app-card');
+      apps.forEach(app => {
+        let name = app.dataset.name.toLowerCase();
+        if (name.includes(input)) {
+          app.style.display = 'block';
+        } else {
+          app.style.display = 'none';
+        }
+      });
+    }
+  </script>
+  <script async="" src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2540728945165922" crossorigin="anonymous" data-checked-head="true"></script>
+
+
+
+<ins class="adsbygoogle adsbygoogle-noablate" data-ad-hi="true" data-adsbygoogle-status="done" style="display: none !important;" data-ad-status="unfilled"><div id="aswift_0_host" style="border: none; height: 0px; width: 0px; margin: 0px; padding: 0px; position: relative; visibility: visible; background-color: transparent; display: inline-block;"><iframe id="aswift_0" name="aswift_0" style="left:0;position:absolute;top:0;border:0;width:undefinedpx;height:undefinedpx;min-height:auto;max-height:none;min-width:auto;max-width:none;" sandbox="allow-forms allow-popups allow-popups-to-escape-sandbox allow-same-origin allow-scripts allow-top-navigation-by-user-activation" frameborder="0" marginwidth="0" marginheight="0" vspace="0" hspace="0" allowtransparency="true" scrolling="no" allow="attribution-reporting; run-ad-auction" src="https://googleads.g.doubleclick.net/pagead/ads?client=ca-pub-2540728945165922&amp;output=html&amp;adk=1812271804&amp;adf=3025194257&amp;lmt=1768416507&amp;plat=3%3A16%2C4%3A16%2C9%3A32776%2C16%3A8388608%2C17%3A32%2C24%3A32%2C25%3A32%2C30%3A1081344%2C32%3A32%2C41%3A32%2C42%3A32%2C43%3A32&amp;format=0x0&amp;url=https%3A%2F%2Fperrotsoft.github.io%2FParrotSoft_Apps&amp;pra=5&amp;aiof=9&amp;asro=0&amp;aiapmd=0.1423&amp;aiapmid=1&amp;aiactd=0&amp;aicctd=0&amp;ailctd=0&amp;aimartd=4&amp;aieuf=1&amp;aicrs=1&amp;uach=WyJXaW5kb3dzIiwiMTkuMC4wIiwieDg2IiwiIiwiMTQ2LjAuNzY4MC4xNjUiLG51bGwsMCxudWxsLCI2NCIsW1siQ2hyb21pdW0iLCIxNDYuMC43NjgwLjE2NSJdLFsiTm90LUEuQnJhbmQiLCIyNC4wLjAuMCJdLFsiR29vZ2xlIENocm9tZSIsIjE0Ni4wLjc2ODAuMTY1Il1dLDBd&amp;abgtt=6&amp;dt=1774721404480&amp;bpp=1&amp;bdt=22&amp;idt=106&amp;shv=r20260326&amp;mjsv=m202603230101&amp;ptt=9&amp;saldr=aa&amp;abxe=1&amp;cookie_enabled=1&amp;eoidce=1&amp;nras=1&amp;correlator=315407304971&amp;frm=20&amp;pv=2&amp;u_tz=120&amp;u_his=6&amp;u_h=1080&amp;u_w=1920&amp;u_ah=1032&amp;u_aw=1920&amp;u_cd=32&amp;u_sd=0.9&amp;dmc=8&amp;adx=-12245933&amp;ady=-12245933&amp;biw=2116&amp;bih=1012&amp;scr_x=0&amp;scr_y=0&amp;eid=95385580%2C42531706%2C95386759%2C95386956%2C95379824&amp;oid=2&amp;pvsid=3373316804184835&amp;tmod=715514775&amp;uas=1&amp;nvt=1&amp;fsapi=1&amp;ref=https%3A%2F%2Fperrotsoft.github.io%2Fdatapedia&amp;fc=1920&amp;brdim=0%2C0%2C0%2C0%2C1920%2C0%2C1920%2C1032%2C2133%2C1012&amp;vis=1&amp;rsz=%7C%7Cs%7C&amp;abl=NS&amp;fu=32768&amp;bc=31&amp;bz=0.9&amp;ifi=1&amp;uci=a!1&amp;fsb=1&amp;dtd=113" data-google-container-id="a!1" tabindex="0" title="Advertisement" aria-label="Advertisement" data-load-complete="true"></iframe></div></ins><veepn-lock-screen><style>@font-face{font-family:FigtreeVF;src:url(chrome-extension://majdfhpaihoncoakbjgbdhglocklcgno/fonts/FigtreeVF.woff2) format("woff2 supports variations"),url(chrome-extension://majdfhpaihoncoakbjgbdhglocklcgno/fonts/FigtreeVF.woff2) format("woff2-variations");font-weight:100 1000;font-display:swap}</style></veepn-lock-screen><iframe src="https://www.google.com/recaptcha/api2/aframe" width="0" height="0" style="display: none;"></iframe></body><app-ls-content ng-version="17.3.7"></app-ls-content><iframe id="google_esf" name="google_esf" src="https://googleads.g.doubleclick.net/pagead/html/r20260326/r20190131/zrt_lookup_fy2021.html" style="display: none;"></iframe></html>
