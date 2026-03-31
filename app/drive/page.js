@@ -209,7 +209,7 @@ export default function ParrotDrive() {
             </header>
 
             <nav className="p-breadcrumb">
-                <span onClick={() => setCurrentPath(null)}>Мой диск</span>
+                <span onClick={() => setCurrentPath(null)}>My disk</span>
                 {getPathArr().map(p => (
                     <span key={p.id} onClick={() => setCurrentPath(p.id)}> / {p.name}</span>
                 ))}

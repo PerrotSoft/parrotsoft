@@ -79,10 +79,13 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
             const newUser = {
                 balance: 1000,
                 apps: [
-                    { id: '1', name: 'Search', icon: '🔍', url: '/' },
-                    { id: '2', name: 'Settings', icon: '⚙️', url: 'sys:settings' },
-                    { id: '3', name: 'Drive', icon: '☁️', url: '/drive' }
-                ],
+                        { id: '1', name: 'Search', icon: '🔍', url: '/' },
+                        { id: '2', name: 'Settings', icon: '⚙️', url: 'sys:settings' },
+                        { id: '3', name: 'Drive', icon: '📂', url: '/drive' },
+                        { id: '4', name: 'DataPedia', icon: '📄', url: '/DataPedia' },
+                        { id: '5', name: 'WavyChat', icon: '💬', url: '/WavyChat' },
+                        { id: '6', name: 'Web-PStudio', icon: '💻', url: '/web_pstudio.html' }
+                    ],
                 avatar: ""
             };
             await onSync(name, cryptoAction(token, newUser, 'enc'));
@@ -272,9 +275,34 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
                         <h3>New Item</h3>
                         <input className="inp-v1" placeholder="Name" value={newApp.name} onChange={e => setNewApp({...newApp, name: e.target.value})} style={{ marginBottom: 10 }} />
                         <input className="inp-v1" placeholder="URL" value={newApp.url} onChange={e => setNewApp({...newApp, url: e.target.value})} style={{ marginBottom: 15 }} />
-                        <div style={{ display: 'flex', gap: 10, marginBottom: 20, justifyContent: 'center', fontSize: 24 }}>
-                            {['🏠','🌐', '🧪', '📂', '🎮'].map(i => (
-                                <span key={i} onClick={() => setNewApp({...newApp, icon: i})} style={{ cursor: 'pointer', opacity: newApp.icon === i ? 1 : 0.3 }}>{i}</span>
+                        <div style={{ 
+                            display: 'grid', 
+                            gridTemplateColumns: 'repeat(5, 1fr)', 
+                            gap: '10px', 
+                            marginBottom: 25, 
+                            maxHeight: '120px', 
+                            overflowY: 'auto',
+                            padding: '10px',
+                            background: '#050505',
+                            borderRadius: '12px'
+                        }}>
+                            {["🏠", "💬", "👥", "📢", "📄", "📚", "📑", "🔍", "💻", "🛠️", "🧪", "🚀", "📂", "📦", "💾", "🌐", "🎮", "⚙️", "🔐", "📊", "📱", "📷", "🎥", "🎵", "🎨", "🎬", "🎤", "🎧", "🧩", "👾", "🌡️", "🔋", "🔌", "📡", "🧭", "☁️", "🛡️", "🔑", "💡", "🔔"].map(i => (
+                                <span 
+                                    key={i} 
+                                    onClick={() => setNewApp({...newApp, icon: i})} 
+                                    style={{ 
+                                        cursor: 'pointer', 
+                                        fontSize: '24px',
+                                        textAlign: 'center',
+                                        padding: '5px',
+                                        borderRadius: '8px',
+                                        background: newApp.icon === i ? 'rgba(0, 112, 243, 0.2)' : 'transparent',
+                                        border: newApp.icon === i ? '1px solid #0070f3' : '1px solid transparent',
+                                        transition: '0.2s'
+                                    }}
+                                >
+                                    {i}
+                                </span>
                             ))}
                         </div>
                         <div style={{ display: 'flex', gap: 10 }}>
