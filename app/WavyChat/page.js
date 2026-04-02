@@ -77,9 +77,9 @@ export default function WevyChat() {
         return () => clearInterval(interval);
     }, [active]);
     const handleCreateChat = async () => {
-        if (!newChatData.title.trim()) return alert("Введите название чата");
+        if (!newChatData.title.trim()) return alert("Enter chat name");
         if (newChatData.privacy === 'private' && !newChatData.password.trim()) {
-            return alert("Для приватного чата обязателен пароль!");
+            return alert("Password is required for private chat!");
         }
 
         setLoading(true);
@@ -97,7 +97,7 @@ export default function WevyChat() {
             setNewChatData({ title: "", type: "group", privacy: "public", password: "", icon: null });
             await loadMyChats(currentUser);
         } catch (e) {
-            alert("Ошибка при создании: " + e.message);
+            alert("Error during creation: " + e.message);
         } finally {
             setLoading(false);
         }
@@ -128,7 +128,7 @@ export default function WevyChat() {
             setRecorder(mediaRecorder);
             setIsRecording(true);
         } catch (err) {
-            alert("Микрофон не доступен: " + err);
+            alert("Microphone not available: " + err);
         }
     };
 
@@ -173,7 +173,7 @@ export default function WevyChat() {
             const updatedMsgs = await actions.getMsgs(active.id);
             setMsgs(updatedMsgs);
         } catch (e) {
-            alert("Ошибка отправки: " + e.message);
+            alert("Sending error: " + e.message);
         } finally {
             setLoading(false);
         }
@@ -182,7 +182,7 @@ export default function WevyChat() {
         try {
             let password = null;
             if (chat.privacy === 'private') {
-                password = prompt("Введите пароль:");
+                password = prompt("Enter password:");
                 if (!password) return;
                 await actions.checkChatAccess(chat.id, password);
             }
@@ -198,7 +198,7 @@ export default function WevyChat() {
             setSearchResults([]);
             
         } catch (e) {
-            alert("Ошибка: " + e.message);
+            alert("Error: " + e.message);
         } finally {
             setLoading(false);
         }
@@ -210,7 +210,7 @@ export default function WevyChat() {
         setText(prev => prev + emoji);
     };
     const deleteSelected = async () => {
-        if (!confirm(`Удалить ${selected.length} сообщений?`)) return;
+        if (!confirm(`Delete ${selected.length} messages?`)) return;
         await actions.deleteMsgs(selected);
         setSelected([]);
         const updatedMsgs = await actions.getMsgs(active.id);
@@ -239,7 +239,7 @@ export default function WevyChat() {
                 <div className="sidebar-tools">
                     <input 
                         className="search-input"
-                        placeholder="Поиск групп..." 
+                        placeholder="Search groups..." 
                         value={searchQuery}
                         onChange={async (e) => {
                             setSearchQuery(e.target.value);
@@ -266,12 +266,12 @@ export default function WevyChat() {
                             </div>
                             <div className="info">
                                 <strong className="chat-title">{c.title}</strong>
-                                <button className="join-action" onClick={() => handleJoinChat(c)}>Вступить</button>
+                                <button className="join-action" onClick={() => handleJoinChat(c)}>Join</button>
                             </div>
                         </div>
                     ))}
 
-                    <small className="section-title">Мои чаты</small>
+                    <small className="section-title">My Chats</small>
                     {myChats.map(c => (
                         <div key={c.id} className={`chat-item ${active?.id === c.id ? 'active' : ''}`} 
                             onClick={() => { setActive(c); actions.getMsgs(c.id).then(setMsgs); }}>
@@ -290,13 +290,13 @@ export default function WevyChat() {
                                         <>
                                             <button onClick={(e) => { 
                                                 e.stopPropagation(); 
-                                                const n = prompt("Новое название:", c.title);
+                                                const n = prompt("New name:", c.title);
                                                 if(n) actions.renameChat(c.id, n).then(() => loadMyChats(currentUser));
                                             }}>✏️</button>
                                             
                                             <button onClick={(e) => {
                                                 e.stopPropagation();
-                                                if(confirm("Удалить группу навсегда?")) 
+                                                if(confirm("Delete group permanently?")) 
                                                     actions.deleteChat(c.id).then(() => { setActive(null); loadMyChats(currentUser); });
                                             }}>🗑️</button>
 
@@ -310,12 +310,12 @@ export default function WevyChat() {
                                     )}
                                     <button onClick={async (e) => {
                                         e.stopPropagation();
-                                        if(confirm(`Покинуть группу "${c.title}"?`)) {
+                                        if(confirm(`Leave group "${c.title}"?`)) {
                                             await actions.leaveChat(c.id, currentUser);
                                             if (active?.id === c.id) setActive(null);
                                             loadMyChats(currentUser);
                                         }
-                                    }}>🚪 Выйти</button>
+                                    }}>🚪 Leave</button>
                                 </div>
                             </div>
                         </div>
@@ -325,19 +325,19 @@ export default function WevyChat() {
             {showCreateModal && (
                 <div className="modal-overlay" onClick={() => setShowCreateModal(false)}>
                     <div className="modal-content" onClick={e => e.stopPropagation()}>
-                        <h3 style={{color: '#0070f3', marginBottom: '15px'}}>Создать чат</h3>
+                        <h3 style={{color: '#0070f3', marginBottom: '15px'}}>Create Chat</h3>
                         
                         <div className="form-item">
                             <input 
                                 className="modal-input"
-                                placeholder="Название..." 
+                                placeholder="Name..." 
                                 value={newChatData.title}
                                 onChange={e => setNewChatData({...newChatData, title: e.target.value})}
                             />
                         </div>
                         <div className="form-item">
                             <label className="file-label">
-                                {newChatData.icon ? "✅ Иконка выбрана" : "📁 Выбрать иконку"}
+                                {newChatData.icon ? "✅ Icon selected" : "📁 Choose icon"}
                                 <input type="file" accept="image/*" onChange={handleIconUpload} style={{display: 'none'}} />
                             </label>
                         </div>
@@ -345,25 +345,25 @@ export default function WevyChat() {
                             <input 
                                 className="modal-input"
                                 type="password"
-                                placeholder="Придумайте пароль" 
+                                placeholder="Create a password for private chat..." 
                                 value={newChatData.password}
                                 onChange={e => setNewChatData({...newChatData, password: e.target.value})}
                             />
                         )}
                         <div style={{display: 'flex', gap: '10px', marginBottom: '15px'}}>
                             <select className="modal-select" value={newChatData.type} onChange={e => setNewChatData({...newChatData, type: e.target.value})}>
-                                <option value="group">Группа</option>
-                                <option value="channel">Канал</option>
+                                <option value="group">Group</option>
+                                <option value="channel">Channel</option>
                             </select>
                             <select className="modal-select" value={newChatData.privacy} onChange={e => setNewChatData({...newChatData, privacy: e.target.value})}>
-                                <option value="public">Публичный</option>
-                                <option value="private">Приватный</option>
+                                <option value="public">Public</option>
+                                <option value="private">Private</option>
                             </select>
                         </div>
 
                         <div style={{display: 'flex', gap: '10px'}}>
-                            <button className="cancel-btn" style={{flex: 1}} onClick={() => setShowCreateModal(false)}>Отмена</button>
-                            <button className="confirm-btn" style={{flex: 1, background: '#0070f3', border: 'none', color: '#fff', borderRadius: '8px', cursor: 'pointer'}} onClick={handleCreateChat}>Создать</button>
+                            <button className="cancel-btn" style={{flex: 1}} onClick={() => setShowCreateModal(false)}>Cancel</button>
+                            <button className="confirm-btn" style={{flex: 1, background: '#0070f3', border: 'none', color: '#fff', borderRadius: '8px', cursor: 'pointer'}} onClick={handleCreateChat}>Create</button>
                         </div>
                     </div>
                 </div>
@@ -374,12 +374,12 @@ export default function WevyChat() {
                         <header className="chat-header">
                             <div className="header-info">
                                 <strong>{active.title}</strong>
-                                <span>  {msgs.length} сообщений</span>
+                                <span>  {msgs.length} messages</span>
                             </div>
                             {selected.length > 0 && (
                                 <div className="batch-actions">
-                                    <button onClick={deleteSelected} className="del-btn">Удалить ({selected.length})</button>
-                                    <button onClick={() => setSelected([])} className="cancel-btn">Отмена</button>
+                                    <button onClick={deleteSelected} className="del-btn">Delete ({selected.length})</button>
+                                    <button onClick={() => setSelected([])} className="cancel-btn">Cancel</button>
                                 </div>
                             )}
                         </header>
@@ -409,7 +409,7 @@ export default function WevyChat() {
                                                             ): (
                                                                 <a href={file.data} download={file.name} className="doc-file" onClick={e => e.stopPropagation()}>
                                                                     📦 <span>{file.name}</span>
-                                                                    <small>Скачать</small>
+                                                                    <small>Download</small>
                                                                 </a>
                                                             )}
                                                         </div>
@@ -445,7 +445,7 @@ export default function WevyChat() {
                                         onMouseUp={stopRecording}
                                         onTouchStart={startRecording}
                                         onTouchEnd={stopRecording}
-                                        title="Зажми для записи голоса"
+                                        title="Hold to record voice"
                                     >
                                         {isRecording ? '🛑' : '🎤'}
                                     </button>
@@ -453,7 +453,7 @@ export default function WevyChat() {
                                     value={text} 
                                     onChange={e => setText(e.target.value)} 
                                     onKeyDown={e => e.key === 'Enter' && onSend()}
-                                    placeholder="Сообщение..."
+                                    placeholder="Message..."
                                 />
                                 
                                 <button className="send-btn" onClick={onSend} disabled={loading}>
@@ -688,10 +688,8 @@ export default function WevyChat() {
                     font-size: 12px;
                 }
                 .modal-select { flex: 1; }
-                /* Кнопка переключения */
                 .toggle-sidebar-btn {
                     position: fixed;
-                    /* Кнопка двигается вместе с краем меню */
                     left: ${isSidebarVisible ? '320px' : '0px'};
                     top: 20px;
                     z-index: 1001;
@@ -714,8 +712,6 @@ export default function WevyChat() {
                     color: #fff;
                     background: #0070f3;
                 }
-
-                /* Стили сайдбара */
                 .sidebar {
                     width: 320px;
                     min-width: 320px;
@@ -724,7 +720,6 @@ export default function WevyChat() {
                     white-space: nowrap;
                 }
 
-                /* Состояние, когда меню скрыто */
                 .sidebar.hidden {
                     width: 0;
                     min-width: 0;
@@ -732,7 +727,6 @@ export default function WevyChat() {
                     opacity: 0;
                 }
 
-                /* Улучшенная стилизация элементов чата */
                 .chat-item {
                     margin: 5px 10px;
                     border-radius: 12px;
@@ -745,11 +739,9 @@ export default function WevyChat() {
 
                 .chat-item.active {
                     background: rgba(0, 112, 243, 0.15);
-                    border-left: none; /* Убираем старую полоску */
-                    box-shadow: inset 0 0 0 1px #0070f3; /* Вместо неё аккуратная рамка */
+                    border-left: none; 
+                    box-shadow: inset 0 0 0 1px #0070f3;
                 }
-
-                /* Поле поиска */
                 .search-input {
                     border: 1px solid #222;
                     transition: all 0.2s;

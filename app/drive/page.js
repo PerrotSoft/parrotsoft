@@ -26,7 +26,6 @@ export default function ParrotDrive() {
         const token = localStorage.getItem('p_token');
         try {
             let rawData;
-            // Декодирование (ваша текущая логика fflate + crypt)
             const decrypted = file.access === 'private' ? crypt(file.data, token) : new Uint8Array(file.data);
             const unzipped = unzipSync(decrypted);
             rawData = unzipped[Object.keys(unzipped)[0]];
@@ -34,8 +33,6 @@ export default function ParrotDrive() {
             const isImg = file.name.match(/\.(jpg|jpeg|png|gif|webp)$/i);
             const blob = new Blob([rawData], { type: isImg ? 'image/png' : 'text/html' });
             const url = URL.createObjectURL(blob);
-
-            // Если это raw-запрос, перенаправляем браузер на blob или заменяем body
             window.location.replace(url); 
         } catch (e) {
             document.body.innerHTML = "Access Denied / Error";
@@ -49,15 +46,13 @@ export default function ParrotDrive() {
             refresh(u).then(() => {
                 const params = new URLSearchParams(window.location.search);
                 const fileId = params.get('file');
-                const isRaw = params.get('raw') === 'true'; // Проверяем флаг raw
+                const isRaw = params.get('raw') === 'true'; 
 
                 if (fileId) {
                     window.getUserFiles(u).then(d => {
                         const f = (d?.files || []).find(x => x.id == fileId);
                         if (f) {
-                            
-                                renderRaw(f); // Вызываем функцию прямого вывода
-                            
+                            renderRaw(f);
                         }
                     });
                 }
@@ -94,7 +89,7 @@ export default function ParrotDrive() {
             const blob = new Blob([raw], { type: isImg ? 'image/generic' : (file.name.endsWith('.html') ? 'text/html' : 'text/plain') });
             const url = URL.createObjectURL(blob);
             setPreview({ url, name: file.name, id: file.id, isHtml: file.name.endsWith('.html'), isImg });
-        } catch (e) { alert("Ошибка доступа или неверный ключ"); }
+        } catch (e) { alert("Access error or invalid key"); }
     };
 
     const onDragStart = (e, id, isFolder) => {

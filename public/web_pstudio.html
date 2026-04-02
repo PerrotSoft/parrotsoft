@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="ru">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
@@ -7,9 +8,9 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
     <script src="https://unpkg.com/@tonejs/midi"></script>
     <script src="https://cdn.jsdelivr.net/npm/midi-writer-js@2.1.4/browser/index.js"></script>
-    
+
     <style>
-        :root {
+         :root {
             --bg: #0b0c0f;
             --panel: #16181d;
             --accent: #ffa500;
@@ -19,15 +20,22 @@
             --text: #c0c0c0;
             --grid-bg: #131418;
         }
-
-        body, html {
-            margin: 0; padding: 0; height: 100%; width: 100%;
-            background: var(--bg); color: var(--text);
+        
+        body,
+        html {
+            margin: 0;
+            padding: 0;
+            height: 100%;
+            width: 100%;
+            background: var(--bg);
+            color: var(--text);
             font-family: 'Segoe UI', Roboto, sans-serif;
-            overflow: hidden; display: flex; flex-direction: column;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
         }
-
-        /* КРАСИВЫЙ ЛОГОТИП СВЕРХУ */
+        /* BEAUTIFUL LOGO AT THE TOP */
+        
         .navbar {
             height: 60px;
             background: #000;
@@ -38,7 +46,7 @@
             border-bottom: 1px solid var(--border);
             z-index: 1000;
         }
-
+        
         .logo-text {
             font-weight: 900;
             letter-spacing: 2px;
@@ -47,9 +55,12 @@
             font-size: 1.2rem;
             text-transform: uppercase;
         }
-
-        .nav-btns { display: flex; gap: 10px; }
-
+        
+        .nav-btns {
+            display: flex;
+            gap: 10px;
+        }
+        
         .nav-btn {
             background: var(--panel);
             border: 1px solid var(--border);
@@ -62,44 +73,61 @@
             transition: 0.3s;
             font-size: 12px;
         }
-
-        .nav-btn:hover { border-color: var(--accent); color: #fff; }
-
-        /* ЭЛЕМЕНТНОЕ ПОЛЕ С ВОЗМОЖНОСТЬЮ СДВИГА */
+        
+        .nav-btn:hover {
+            border-color: var(--accent);
+            color: #fff;
+        }
+        /* ELEMENT FIELD WITH SHIFT CAPABILITY */
+        
         .page-container {
             flex-grow: 1;
             position: relative;
-            overflow-x: auto; /* Позволяет сдвигать вбок, если контент шире экрана */
+            overflow-x: auto;
+            /* Allows shifting sideways if content is wider than screen */
             overflow-y: hidden;
             display: flex;
         }
-
+        
         .page {
             display: none;
             width: 100%;
             height: 100%;
             flex-shrink: 0;
-            /* Уменьшаем масштаб элементов внутри, если нужно (scale 0.9 = 90%) */
+            /* Reduce scale of elements inside if needed (scale 0.9 = 90%) */
             transform-origin: top left;
         }
         
-        .page.active { display: block; }
-
+        .page.active {
+            display: block;
+        }
         /* Если экран маленький, принудительно уменьшаем содержимое */
+        
         @media screen and (max-width: 768px) {
-            .logo-text { font-size: 0.9rem; }
+            .logo-text {
+                font-size: 0.9rem;
+            }
             .page.active {
-                width: 120%; /* Делаем рабочее поле шире экрана */
-                transform: scale(0.83); /* Но уменьшаем его, чтобы влезло больше кнопок */
+                width: 120%;
+                /* Делаем рабочее поле шире экрана */
+                transform: scale(0.83);
+                /* Но уменьшаем его, чтобы влезло больше кнопок */
             }
         }
-
-        iframe { width: 100%; height: 100%; border: none; }
-
+        
+        iframe {
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
         /* ПРЕВЬЮ ПАНЕЛЬ */
+        
         .preview-panel {
             position: fixed;
-            bottom: -100%; left: 0; width: 100%; height: 55vh;
+            bottom: -100%;
+            left: 0;
+            width: 100%;
+            height: 55vh;
             background: var(--panel);
             border-top: 3px solid var(--accent);
             transition: 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.2);
@@ -109,10 +137,15 @@
             box-sizing: border-box;
             gap: 20px;
         }
-
-        .preview-panel.open { bottom: 0; }
-        .preview-panel.type-3d { border-top-color: var(--accent-3d); }
-
+        
+        .preview-panel.open {
+            bottom: 0;
+        }
+        
+        .preview-panel.type-3d {
+            border-top-color: var(--accent-3d);
+        }
+        
         .preview-img {
             width: 300px;
             height: 100%;
@@ -120,25 +153,37 @@
             border-radius: 8px;
             border: 1px solid var(--border);
         }
-
+        
         .launch-btn {
             background: var(--accent);
-            color: #000; border: none;
-            padding: 15px 30px; font-weight: 900;
-            cursor: pointer; border-radius: 4px;
-            text-transform: uppercase; margin-top: 15px;
+            color: #000;
+            border: none;
+            padding: 15px 30px;
+            font-weight: 900;
+            cursor: pointer;
+            border-radius: 4px;
+            text-transform: uppercase;
+            margin-top: 15px;
         }
-
+        
         .overlay {
             position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.85);
-            display: none; z-index: 1500;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            display: none;
+            z-index: 1500;
             backdrop-filter: blur(4px);
         }
-        .overlay.active { display: block; }
+        
+        .overlay.active {
+            display: block;
+        }
     </style>
 </head>
+
 <body>
 
     <div class="navbar">
@@ -216,4 +261,5 @@
         };
     </script>
 </body>
+
 </html>

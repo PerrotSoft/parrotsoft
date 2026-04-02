@@ -226,9 +226,9 @@ export async function checkChatAccess(chatId, password) {
     args: [chatId]
   });
   const chat = rs.rows[0];
-  if (!chat) throw new Error("Чат не найден");
+  if (!chat) throw new Error("Chat not found");
   if (chat.privacy === 'private' && String(chat.password) !== String(password)) {
-    throw new Error("Неверный пароль");
+    throw new Error("Invalid password");
   }
   
   return { success: true };

@@ -24,7 +24,7 @@ export default async function SearchPage({ searchParams }) {
                     <input 
                         name="q"
                         defaultValue={query} 
-                        placeholder="Поиск в базе..."
+                        placeholder="Searching the database..."
                         autoFocus
                     />
                 </form>
@@ -42,7 +42,7 @@ export default async function SearchPage({ searchParams }) {
                     
                     {query && results.length === 0 && (
                         <div className="not-found">
-                            Ничего не найдено для "{query}". <a href={`https://google.com/search?q=${query}`}>Искать в Google</a>
+                            Nothing found for "{query}". <a href={`https://google.com/search?q=${query}`}>Search on Google</a>
                         </div>
                     )}
                 </div>

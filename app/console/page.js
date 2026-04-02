@@ -22,28 +22,28 @@ export default function ConsolePage() {
     return (
         <div className="console-page">
             <form onSubmit={handleSubmit} className="modal-box">
-                <h3>Новая запись</h3>
+                <h3>New entry</h3>
                 <input 
-                    placeholder="Название проекта" 
+                    placeholder="Project name" 
                     required 
                     value={form.name} 
                     onChange={e => setForm({...form, name: e.target.value})} 
                 />
                 <input 
-                    placeholder="Ссылка (URL)" 
+                    placeholder="URL" 
                     required 
                     value={form.url} 
                     onChange={e => setForm({...form, url: e.target.value})} 
                 />
                 <textarea 
-                    placeholder="Описание" 
+                    placeholder="Description" 
                     value={form.desc} 
                     onChange={e => setForm({...form, desc: e.target.value})} 
                 />
                 <div className="modal-btns">
-                    <button type="button" className="cancel" onClick={() => router.push('/search')}>Отмена</button>
+                    <button type="button" className="cancel" onClick={() => router.push('/search')}>Cancel</button>
                     <button type="submit" className="save" disabled={isPending}>
-                        {isPending ? 'Запись...' : 'Сохранить'}
+                        {isPending ? 'Saving...' : 'Save'}
                     </button>
                 </div>
             </form>

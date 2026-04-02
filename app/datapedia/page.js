@@ -51,7 +51,7 @@ export default function DatapediaPage() {
     }, []);
 
     const allArticles = useMemo(() => [
-        { name: "Home", icon: "🏠", content: "# Datapedia\nОбщая база знаний.", owner: "System" },
+        { name: "Home", icon: "🏠", content: "# Datapedia\nGeneral knowledge base.", owner: "System" },
         ...allDocs
     ], [allDocs]);
 
@@ -88,7 +88,7 @@ export default function DatapediaPage() {
             router.push(`?doc=${encodeURIComponent(newDoc.name)}`);
         } catch (e) { 
             console.error(e);
-            alert("Ошибка при публикации"); 
+            alert("Error during publication"); 
         }
     };
 
@@ -97,7 +97,7 @@ export default function DatapediaPage() {
     return (
         <div className="dp-root">
             <button className="dp-mobile-menu-btn" onClick={() => setIsSideOpen(true)}>☰</button>
-            {/* Сайдбар */}
+            {/* Sidebar */}
             <aside className={`dp-sidebar ${isSideOpen ? 'open' : ''}`}>
                 <div className="dp-side-top">
                     <div className="dp-brand">
@@ -137,7 +137,7 @@ export default function DatapediaPage() {
                 </div>
             </aside>
 
-            {/* Контент */}
+            {/* Content */}
             <main className="dp-main">
                 <div className="dp-content-wrap">
                     <div className="dp-doc-header">
@@ -154,8 +154,6 @@ export default function DatapediaPage() {
                     </div>
                 </div>
             </main>
-
-            {/* Модалка с кнопкой "Добавить в поисковик" */}
             {isModalOpen && (
                 <div className="dp-modal-overlay">
                     <div className="dp-modal">
@@ -176,7 +174,6 @@ export default function DatapediaPage() {
                             </div>
                         </div>
                         <div className="dp-modal-foot">
-                            {/* ТА САМАЯ КНОПКА/ГАЛОЧКА */}
                             <label className="dp-toggle">
                                 <input type="checkbox" checked={form.publishToSearch} onChange={e=>setForm({...form, publishToSearch: e.target.checked})} />
                                 <span>Add to ParrotSearch index</span>
@@ -237,119 +234,110 @@ export default function DatapediaPage() {
                 .dp-foot-btns { display: flex; gap: 15px; }
                 .dp-btn-pri { background: #fff; color: #000; border: none; padding: 10px 25px; border-radius: 6px; font-weight: 700; cursor: pointer; }
                 .dp-btn-sec { background: transparent; color: #555; border: none; cursor: pointer; }
-                /* Кнопка меню (по умолчанию скрыта) */
-.dp-mobile-menu-btn {
-    display: none;
-    position: fixed;
-    top: 15px;
-    left: 15px;
-    z-index: 90;
-    background: #fff;
-    color: #000;
-    border: none;
-    border-radius: 8px;
-    width: 40px;
-    height: 40px;
-    font-size: 20px;
-    cursor: pointer;
-}
+                .dp-mobile-menu-btn {
+                    display: none;
+                    position: fixed;
+                    top: 15px;
+                    left: 15px;
+                    z-index: 90;
+                    background: #fff;
+                    color: #000;
+                    border: none;
+                    border-radius: 8px;
+                    width: 40px;
+                    height: 40px;
+                    font-size: 20px;
+                    cursor: pointer;
+                }
+                .dp-close-sidebar { display: none; }
+                @media (max-width: 850px) {
+                    .dp-mobile-menu-btn { display: block; }
 
-.dp-close-sidebar { display: none; }
+                    .dp-sidebar {
+                        position: fixed;
+                        left: -100%;
+                        top: 0;
+                        bottom: 0;
+                        width: 85% !important;
+                        z-index: 1000;
+                        transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                        box-shadow: 20px 0 50px rgba(0,0,0,0.5);
+                    }
 
-@media (max-width: 850px) {
-    .dp-mobile-menu-btn { display: block; }
+                    .dp-sidebar.open {
+                        left: 0; 
+                    }
 
-    .dp-sidebar {
-        position: fixed;
-        left: -100%; /* Прячем за экран */
-        top: 0;
-        bottom: 0;
-        width: 85% !important; /* На весь экран (почти) */
-        z-index: 1000;
-        transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        box-shadow: 20px 0 50px rgba(0,0,0,0.5);
-    }
+                    .dp-close-sidebar {
+                        display: block;
+                        margin-left: auto;
+                        background: none;
+                        border: none;
+                        color: #555;
+                        font-size: 24px;
+                    }
 
-    .dp-sidebar.open {
-        left: 0; /* Выезжает */
-    }
+                    .dp-sidebar-overlay {
+                        position: fixed;
+                        inset: 0;
+                        background: rgba(0,0,0,0.7);
+                        backdrop-filter: blur(4px);
+                        z-index: 999;
+                    }
 
-    .dp-close-sidebar {
-        display: block;
-        margin-left: auto;
-        background: none;
-        border: none;
-        color: #555;
-        font-size: 24px;
-    }
+                    .dp-main {
+                        padding: 80px 20px 30px; 
+                    }
 
-    .dp-sidebar-overlay {
-        position: fixed;
-        inset: 0;
-        background: rgba(0,0,0,0.7);
-        backdrop-filter: blur(4px);
-        z-index: 999;
-    }
+                    h1 {
+                        font-size: 2.5rem;
+                    }
 
-    .dp-main {
-        padding: 80px 20px 30px; /* Отступ сверху для кнопки */
-    }
+                    .dp-nav-txt {
+                        display: block !important;
+                    }
+                }
+                @media (max-width: 850px) {
+                .dp-sidebar-header {
+                    display: flex;
+                    align-items: center;
+                    justify-content: space-between;
+                    margin-bottom: 25px;
+                    padding: 0 10px;
+                }
+                .dp-close-sidebar {
+                    display: none;
+                }
 
-    h1 {
-        font-size: 2.5rem;
-    }
+                .dp-brand {
+                    display: flex;
+                    align-items: center;
+                    gap: 10px;
+                    font-weight: 800;
+                    cursor: pointer;
+                    margin-bottom: 0 !important; 
+                }
+                    .dp-close-sidebar {
+                        display: flex; 
+                        align-items: center;
+                        justify-content: center;
+                        background: #1a1a1a;
+                        border: none;
+                        color: #888;
+                        font-size: 24px;
+                        width: 32px;
+                        height: 32px;
+                        border-radius: 6px;
+                        cursor: pointer;
+                        line-height: 1;
+                        padding-bottom: 4px;
+                    }
 
-    .dp-nav-txt {
-        display: block !important; /* Возвращаем текст в мобильном меню */
-    }
-}
-
-
-@media (max-width: 850px) {
-    /* Базовый стиль для заголовка сайдбара */
-.dp-sidebar-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 25px;
-    padding: 0 10px;
-}
-
-/* На ПК кнопка закрытия нам не нужна */
-.dp-close-sidebar {
-    display: none;
-}
-
-/* Убираем старый маргин у бренда, так как он теперь в контейнере */
-.dp-brand {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-weight: 800;
-    cursor: pointer;
-    margin-bottom: 0 !important; 
-}
-    .dp-close-sidebar {
-        display: flex; /* Показываем только на мобилках */
-        align-items: center;
-        justify-content: center;
-        background: #1a1a1a;
-        border: none;
-        color: #888;
-        font-size: 24px;
-        width: 32px;
-        height: 32px;
-        border-radius: 6px;
-        cursor: pointer;
-        line-height: 1;
-        padding-bottom: 4px; /* Небольшая корректировка центровки крестика */
-    }
-
-    .dp-close-sidebar:active {
-        background: #333;
-        color: #fff;
-    }
-}
+                    .dp-close-sidebar:active {
+                        background: #333;
+                        color: #fff;
+                    }
+                }
             `}</style>
         </div>
     );
