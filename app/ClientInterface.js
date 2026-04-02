@@ -84,7 +84,8 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
                         { id: '3', name: 'Drive', icon: '📂', url: '/drive' },
                         { id: '4', name: 'DataPedia', icon: '📄', url: '/DataPedia' },
                         { id: '5', name: 'WavyChat', icon: '💬', url: '/WavyChat' },
-                        { id: '6', name: 'Web-PStudio', icon: '💻', url: '/web_pstudio.html' }
+                        { id: '6', name: 'Web-PStudio', icon: '💻', url: '/web_pstudio.html' },
+                        { id: '7', name: 'ParrotOS Installer', icon: '💻', url: '/installer' }
                     ],
                 avatar: ""
             };

@@ -60,7 +60,7 @@ export default function FullscreenInstaller() {
             const filePath = `/dist/${selectedVersion.filename}`;
 
             const response = await fetch(filePath);
-            if (!response.ok) throw new Error(`Файл не найден по пути: ${filePath}`);
+            if (!response.ok) throw new Error(`File not found at path: ${filePath}`);
 
             const total = response.headers.get('content-length');
             const reader = response.body.getReader();
@@ -90,8 +90,8 @@ export default function FullscreenInstaller() {
                 setDownloadProgress(0);
             }, 1000);
         } catch (error) {
-            console.error("Ошибка пути:", error.message);
-            alert('Deployment Error: Проверь, что файл лежит в public/dist/ и называется точно ' + selectedVersion.filename);
+            console.error("Path error:", error.message);
+            alert('Deployment Error: Check that the file exists in public/dist and is named exactly ' + selectedVersion.filename);
             setIsDownloading(false);
         }
     };
@@ -133,7 +133,7 @@ export default function FullscreenInstaller() {
             `}</style>
 
             <header className="top-nav">
-                <div style={{ fontWeight: 900, color: '#0070f3', marginRight: '20px' }}>PARROT_OS</div>
+                <div style={{ fontWeight: 900, color: '#0070f3', marginRight: '20px' }}>ParrotOS Installer</div>
                 {['All', 'ParrotOS', 'PS-DOS', 'Kernel', 'Source'].map(cat => (
                     <div key={cat} className={`nav-btn ${filter === cat ? 'active' : ''}`} onClick={() => { setFilter(cat); setSelectedVersion(null); }}>{cat}</div>
                 ))}

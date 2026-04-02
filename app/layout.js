@@ -100,7 +100,7 @@ export default async function RootLayout({ children }) {
   }
 
   return (
-    <html lang="ru">
+    <html lang="en">
       <head>
         <title>ParrotSoft</title>
       </head>
