@@ -1,0 +1,49 @@
+[Defines]
+  INF_VERSION                    = 0x00010005
+  BASE_NAME                      = ParrotOS
+  FILE_GUID                      = 6987936E-ED34-44db-AE97-1FA5E4ED2116
+  MODULE_TYPE                    = UEFI_APPLICATION
+  VERSION_STRING                 = 1.0
+  ENTRY_POINT                    = UefiMain
+
+[Sources]
+  ParrotOS.c
+  lib/DriverManager.c
+  lib/KeyBord.c
+  lib/fat32.c
+  lib/Video_Driver.c
+  lib/Network.c
+  lib/Interrup.c
+  lib/task.c
+  lib/pex.c
+  lib/font.c
+  lib/AudioDriver.c
+  lib/MouseDriver.c
+
+[Packages]
+  MdePkg/MdePkg.dec
+  MdeModulePkg/MdeModulePkg.dec
+[LibraryClasses]
+  UefiApplicationEntryPoint
+  BaseMemoryLib
+  UefiLib
+  BaseLib              # <--- Должно быть здесь для работы со строками
+  MemoryAllocationLib  # <--- Для AllocatePool
+  PrintLib
+
+[UserExtensions.TianoCore."ExtraFiles"]
+  ParrotOSExtra.uni
+[Protocols]
+  gEfiSimpleFileSystemProtocolGuid
+  gEfiLoadedImageProtocolGuid
+  gEfiSimpleTextInputExProtocolGuid
+  gEfiTcp4ProtocolGuid
+  gEfiTcp4ServiceBindingProtocolGuid
+  gEfiDns4ProtocolGuid
+  gEfiDns4ServiceBindingProtocolGuid
+  gEfiCpuArchProtocolGuid
+  gEfiSimplePointerProtocolGuid
+  gEfiPciIoProtocolGuid
+
+[Guids]
+  gEfiFileInfoGuid
