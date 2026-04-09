@@ -13,6 +13,7 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
     const [form, setForm] = useState({ username: '', pass: '' });
     const [newApp, setNewApp] = useState({ name: '', icon: '🌐', url: '' });
     const [editForm, setEditForm] = useState({ pass: '', avatar: '' });
+    const [balance, setBalance] = useState(0);
 
     const cryptoAction = (key, input, mode = 'enc') => {
         try {
@@ -41,7 +42,12 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
             window.cryptoAction = cryptoAction;
         }
     }, [dbActions]);
-
+    useEffect(() => {
+        const username = localStorage.getItem('p_user') || "poly"; // Или из куки
+        if (dbActions?.getBalance) {
+            dbActions.getBalance(username).then(setBalance);
+        }
+    }, [user]);
     useEffect(() => {
         const init = async () => {
             const savedName = localStorage.getItem('p_user');
@@ -50,7 +56,8 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
             if (savedName && savedToken && serverDB[savedName]) {
                 const entry = serverDB[savedName];
                 let rawData = entry.data || entry;
-
+                const val = await dbActions.getBalance(savedName);
+                setBalance(val);
                 try {
                     const parsed = JSON.parse(rawData);
                     if (parsed.os) rawData = parsed.os;
@@ -68,7 +75,44 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
         };
         init();
     }, [serverDB]);
+    const handleTopUp = async () => {
+        const amount = 500; 
+        const res = await dbActions.addBalance(user.username, amount);
+        
+        if (res.success && res.payUrl) {
+            const payWin = window.open(res.payUrl, 'Payment', 'width=400,height=600');
+            const timer = setInterval(async () => {
+                if (payWin.closed) {
+                    clearInterval(timer);
+                    const newB = await dbActions.getBalance(user.username);
+                    setBalance(newB);
+                }
+            }, 1000);
+        }
+    };
+    const handlePaymentClick = async () => {
+    const amount = 500; // или значение из инпута
+    const res = await dbActions.addBalance(user.username, amount);
 
+    if (res.success && res.payUrl) {
+        // Параметры для "отдельного окна"
+        const width = 450;
+        const height = 600;
+        const left = (window.screen.width / 2) - (width / 2);
+        const top = (window.screen.height / 2) - (height / 2);
+
+        // window.open с этими параметрами создаст маленькое окно без вкладок
+        const payWindow = window.open(
+            res.payUrl, 
+            'ParrotPaySystem', 
+            `width=${width},height=${height},top=${top},left=${left},scrollbars=no,resizable=no`
+        );
+
+        if (!payWindow) {
+            alert("Браузер заблокировал окно оплаты! Разрешите всплывающие окна.");
+        }
+    }
+};
     const handleAuth = async (e) => {
         e.preventDefault();
         const token = await generateKey(form.pass);
@@ -77,7 +121,7 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
         if (authMode === 'register') {
             if (serverDB[name]) return alert("Username taken!");
             const newUser = {
-                balance: 1000,
+                balance: balance,
                 apps: [
                         { id: '1', name: 'Search', icon: '🔍', url: '/' },
                         { id: '2', name: 'Settings', icon: '⚙️', url: 'sys:settings' },
@@ -246,7 +290,7 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
                 </div>
                 <div style={{ lineHeight: 1 }}>
                     <div style={{ fontSize: 12, fontWeight: 800 }}>{user.username}</div>
-                    <div style={{ fontSize: 10, opacity: 0.5 }}>{user.balance} pc</div>
+                    <div style={{ fontSize: 10, opacity: 0.5 }}>{balance} pc</div>
                 </div>
                 <button className="btn-v6" style={{ fontSize: 22 }} onClick={() => setLauncherOpen(!launcherOpen)}>⠿</button>
             </header>
@@ -336,6 +380,31 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
                             await sync(updated);
                             setView('main');
                         }}>Save</button>
+                        <div style={{ background: 'rgba(255,255,255,0.05)', padding: '15px', borderRadius: '20px', marginBottom: '20px' }}>
+                            <p style={{ fontSize: '14px', opacity: 0.7, marginBottom: '10px' }}>Current Balance: <b>{balance} pc</b></p>
+                            <div style={{ display: 'flex', gap: '10px' }}>
+                                <input 
+                                    className="inp-v1" 
+                                    type="number" 
+                                    placeholder="Amount..." 
+                                    id="add_amount"
+                                    style={{ flex: 1, marginBottom: 0 }} 
+                                />
+                                <button className="btn-v4" style={{ width: 'auto', padding: '0 20px' }} onClick={async () => {
+                                    const amount = document.getElementById('add_amount').value;
+                                    if (!amount || amount <= 0) return alert("Введите сумму!");
+                                    
+                                    const res = await dbActions.addBalance(user.username, amount);
+                                    if (res.success) {
+                                        setBalance(res.newBalance);
+                                        document.getElementById('add_amount').value = '';
+                                        alert(`Зачислено ${amount} pc!`);
+                                    }
+                                }}>
+                                    add Pey Coins
+                                </button>
+                            </div>
+                        </div>
                         <button className="btn-v5" style={{ width: '100%', color: 'red', marginBottom: 10 }} onClick={() => { localStorage.clear(); window.location.reload(); }}>Logout</button>
                         <button className="btn-v1" style={{ width: '100%' }} onClick={() => setView('main')}>Back</button>
                     </div>

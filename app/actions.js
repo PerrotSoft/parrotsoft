@@ -261,3 +261,322 @@ export async function deleteMsgs(ids) {
     args: ids
   });
 }
+
+
+
+
+
+
+
+
+export async function initParrotDB() {
+  await ensureTables();
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS market_items (
+      pkg_name TEXT PRIMARY KEY, 
+      display_name TEXT, 
+      icon TEXT, 
+      author TEXT,
+      description TEXT,
+      type TEXT DEFAULT 'App',
+      os_versions TEXT DEFAULT '[]',
+      installs INTEGER DEFAULT 0,
+      price INTEGER DEFAULT 0,
+      custom_ui TEXT DEFAULT '',
+      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS market_purchases (
+      username TEXT,
+      pkg_name TEXT,
+      PRIMARY KEY (username, pkg_name)
+    )
+  `);
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS market_reviews (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, 
+      pkg_name TEXT, 
+      username TEXT, 
+      rating INTEGER, 
+      comment TEXT,
+      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  const cols = [
+    {n: 'description', t: 'TEXT'},
+    {n: 'installs', t: 'INTEGER DEFAULT 0'},
+    {n: 'os_versions', t: "TEXT DEFAULT '[]'"},
+    {n: 'price', t: 'INTEGER DEFAULT 0'},
+    {n: 'custom_ui', t: 'TEXT DEFAULT ""'}
+  ];
+  for (const c of cols) {
+    try { await client.execute(`ALTER TABLE market_items ADD COLUMN ${c.n} ${c.t}`); } catch(e) {}
+  }
+}
+export async function addBalance(username, amount) {
+  const name = typeof username === 'object' ? username.username : username;
+  
+  if (!name) return 0;
+
+  await initParrotDB();
+  
+  try {
+    const userRes = await client.execute({
+      sql: "SELECT data FROM users WHERE username = ?",
+      args: [name]
+    });
+
+    if (userRes.rows.length > 0) {
+      let userData = JSON.parse(userRes.rows[0].data);
+      const currentBalance = Number(userData.balance) || 0;
+      const addAmount = Number(amount) || 0;
+      
+      userData.balance = currentBalance + addAmount;
+      
+      await client.execute({
+        sql: "UPDATE users SET data = ? WHERE username = ?",
+        args: [JSON.stringify(userData), name]
+      });
+      
+      return userData.balance;
+    }
+  } catch (e) {
+    console.error("Ошибка при пополнении:", e);
+  }
+  return 0;
+}
+export async function getMarketItems(q = "") {
+  await initParrotDB();
+  const sql = q 
+    ? "SELECT * FROM market_items WHERE display_name LIKE ? ORDER BY timestamp DESC" 
+    : "SELECT * FROM market_items ORDER BY timestamp DESC";
+  const rs = await client.execute({ sql, args: q ? [`%${q}%`] : [] });
+  
+  const items = [];
+  for (const row of rs.rows) {
+    const revs = await client.execute({ 
+      sql: "SELECT AVG(rating) as avg, COUNT(*) as cnt FROM market_reviews WHERE pkg_name = ?", 
+      args: [row.pkg_name] 
+    });
+    items.push({
+      ...row,
+      os_versions: JSON.parse(row.os_versions || '[]'),
+      rating: revs.rows[0]?.avg || 0,
+      rev_count: revs.rows[0]?.cnt || 0
+    });
+  }
+  return items;
+}
+
+export async function uploadApp(appData) {
+  await initParrotDB();
+  await client.execute({
+    sql: `INSERT INTO market_items (pkg_name, display_name, icon, author, description, type, os_versions, price, custom_ui) 
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) 
+          ON CONFLICT(pkg_name) DO UPDATE SET 
+          icon=excluded.icon, os_versions=excluded.os_versions, description=excluded.description, 
+          display_name=excluded.display_name, price=excluded.price, custom_ui=excluded.custom_ui`,
+    args: [appData.pkg, appData.name, appData.icon, appData.author, appData.desc, appData.type, JSON.stringify(appData.versions), appData.price || 0, appData.custom_ui || '']
+  });
+}
+
+export async function deleteApp(pkg, user) {
+  await client.execute({ sql: "DELETE FROM market_items WHERE pkg_name = ? AND author = ?", args: [pkg, user] });
+}
+
+export async function addReview(pkg, user, rating, comment) {
+  await client.execute({
+    sql: "INSERT INTO market_reviews (pkg_name, username, rating, comment) VALUES (?, ?, ?, ?)",
+    args: [pkg, user, rating, comment]
+  });
+}
+
+export async function getReviews(pkg) {
+  const rs = await client.execute({
+    sql: "SELECT * FROM market_reviews WHERE pkg_name = ? ORDER BY timestamp DESC",
+    args: [pkg]
+  });
+  return rs.rows;
+}
+export async function getBalance(user) {
+  if (!user) return 0;
+  await initParrotDB();
+  const rs = await client.execute({ 
+    sql: "SELECT data FROM users WHERE username = ?", 
+    args: [String(user)] 
+  });
+
+  if (rs.rows.length > 0) {
+    try {
+      const userData = JSON.parse(rs.rows[0].data);
+      return Number(userData.balance) || 0;
+    } catch (e) {
+      console.error("Ошибка парсинга данных пользователя:", e);
+      return 0;
+    }
+  }
+  
+  return 0;
+}
+
+export async function addPyCoins(user, amount = 1000) {
+  await initParrotDB();
+  await client.execute({ sql: "UPDATE users SET pycoins = pycoins + ? WHERE username = ?", args: [amount, String(user)] });
+}
+export async function checkOwnership(username, pkg) {
+  await initParrotDB();
+  try {
+    const rs = await client.execute({
+      sql: "SELECT 1 FROM market_purchases WHERE username = ? AND pkg_name = ?",
+      args: [String(username), pkg]
+    });
+    return rs.rows.length > 0;
+  } catch (e) {
+    console.error("Ошибка проверки владения:", e);
+    return false;
+  }
+}
+export async function buyApp(pkg_name, buyer_username) {
+  'use server';
+  try {
+    await ensureTables();
+
+    const marketRes = await client.execute({
+      sql: "SELECT author, price, display_name FROM market_items WHERE pkg_name = ?",
+      args: [pkg_name]
+    });
+
+    if (marketRes.rows.length === 0) return { success: false, error: "Приложение не найдено" };
+    
+    const app = marketRes.rows[0];
+    const price = Number(app.price) || 0;
+    const author = app.author;
+
+    const buyerData = await getRawUserData(buyer_username);
+    const buyerBalance = Number(buyerData.balance || 0);
+
+    if (buyerBalance < price) return { success: false, error: "Недостаточно средств" };
+    buyerData.balance = buyerBalance - price;
+    if (!buyerData.owned_apps) buyerData.owned_apps = [];
+    if (!buyerData.owned_apps.includes(pkg_name)) {
+        buyerData.owned_apps.push(pkg_name);
+    }
+
+    await client.execute({
+      sql: "UPDATE users SET data = ? WHERE username = ?",
+      args: [JSON.stringify(buyerData), String(buyer_username)]
+    });
+
+    if (author && author !== buyer_username) {
+        const authorData = await getRawUserData(author);
+        const authorBalance = Number(authorData.balance || 0);
+        
+        authorData.balance = authorBalance + price;
+
+        await client.execute({
+          sql: "UPDATE users SET data = ? WHERE username = ?",
+          args: [JSON.stringify(authorData), String(author)]
+        });
+        console.log(`Начислено ${price} pc автору ${author}`);
+    }
+
+    return { success: true, newBalance: buyerData.balance };
+
+  } catch (error) {
+    console.error("Ошибка при покупке:", error);
+    return { success: false, error: error.message };
+  }
+}
+export async function apiSearchPacks(query = "") {
+  await initParrotDB();
+  const sql = "SELECT pkg_name, display_name, author, type, price FROM market_items WHERE display_name LIKE ? OR pkg_name LIKE ?";
+  const rs = await client.execute({ sql, args: [`%${query}%`, `%${query}%`] });
+  return rs.rows;
+}
+export async function GET(request, { params }) {
+    const { pkg } = params; 
+    const { searchParams } = new URL(request.url);
+    
+    const buildName = searchParams.get('build');
+    const targetOs = searchParams.get('os');  
+
+    try {
+        const rs = await client.execute({
+            sql: "SELECT * FROM market_items WHERE pkg_name = ?",
+            args: [pkg]
+        });
+
+        if (rs.rows.length === 0) {
+            return NextResponse.json({ error: "Package not found" }, { status: 404 });
+        }
+
+        const app = rs.rows[0];
+        const versions = JSON.parse(app.os_versions || '[]');
+
+        let selectedBuild = null;
+
+        if (buildName) {
+            selectedBuild = versions.find(v => v.name === buildName);
+        } else if (targetOs) {
+            selectedBuild = versions.find(v => v.os === targetOs);
+        }
+        if (!selectedBuild) {
+            selectedBuild = versions[0];
+        }
+
+        return NextResponse.json({
+            package: app.pkg_name,
+            display_name: app.display_name,
+            resolved_build: selectedBuild ? {
+                name: selectedBuild.name,
+                url: selectedBuild.link,
+                os: selectedBuild.os,
+                arch: selectedBuild.arch || 'x64'
+            } : null,
+            status: selectedBuild ? "success" : "no_builds_available"
+        });
+
+    } catch (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+}
+export async function apiGetManifest(pkg_name) {
+  await initParrotDB();
+  const rs = await client.execute({
+    sql: "SELECT * FROM market_items WHERE pkg_name = ?",
+    args: [pkg_name]
+  });
+
+  if (rs.rows.length === 0) return { error: "Package not found" };
+
+  const item = rs.rows[0];
+  return {
+    package: item.pkg_name,
+    name: item.display_name,
+    author: item.author,
+    description: item.description,
+    price: item.price,
+    versions: JSON.parse(item.os_versions || '[]'),
+    timestamp: item.timestamp
+  };
+}
+
+export async function apiResolvePackage(pkg_name, os = "ParrotOS", arch = "x64") {
+  const manifest = await apiGetManifest(pkg_name);
+  if (manifest.error) return manifest;
+
+  const versions = manifest.versions;
+  const compatible = versions.find(v => v.os === os && (v.arch === arch || !v.arch)) 
+                   || versions.find(v => v.isPrimary);
+
+  if (!compatible) return { error: "No compatible version found for your OS/Arch" };
+
+  return {
+    pkg_name: manifest.package,
+    version_name: compatible.name,
+    download_url: compatible.link,
+    file_type: compatible.type,
+    price: manifest.price
+  };
+}

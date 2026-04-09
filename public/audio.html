@@ -642,7 +642,7 @@ console.log("Plugin Applied: Noise Filter Active");</textarea>
             const meter = new Tone.Meter();
             channelVol.connect(meter);
 
-            // Добавлена обработка ошибок загрузки, чтобы плеер не вис
+            // Создаём сэмплер без небезопасных ссылок в коллбэках
             const sampler = new Tone.Sampler({
                 urls: {
                     "C4": "https://tonejs.github.io/audio/salamander/C4.mp3"
@@ -653,8 +653,7 @@ console.log("Plugin Applied: Noise Filter Active");</textarea>
                     console.log("Трек " + id + " загружен");
                 },
                 onerror: (err) => {
-                    console.warn("Ошибка загрузки сэмпла, используем заглушку");
-                    t.sampleLoaded = false;
+                    console.warn("Ошибка загрузки сэмпла:", err);
                 }
             }).connect(channelVol);
 
@@ -674,44 +673,7 @@ console.log("Plugin Applied: Noise Filter Active");</textarea>
             renderMixer();
         }
 
-        function addNewTrack(name = "Sampler") {
-            const id = tracks.length;
-            const channelFilter = new Tone.Filter(4000, "lowpass").connect(masterFilter);
-            const channelVol = new Tone.Volume(-12).connect(channelFilter);
-            const meter = new Tone.Meter();
-            channelVol.connect(meter);
 
-            // Добавлена обработка ошибок загрузки, чтобы плеер не вис
-            const sampler = new Tone.Sampler({
-                urls: {
-                    "C4": "https://tonejs.github.io/audio/salamander/C4.mp3"
-                },
-                release: 1,
-                baseUrl: "",
-                onload: () => {
-                    console.log("Трек " + id + " загружен");
-                },
-                onerror: (err) => {
-                    console.warn("Ошибка загрузки сэмпла, используем заглушку");
-                    t.sampleLoaded = false;
-                }
-            }).connect(channelVol);
-
-            const newTrack = {
-                name: name + " " + (id + 1),
-                notes: [],
-                inst: sampler,
-                volume: channelVol,
-                filter: channelFilter,
-                meter: meter,
-                volVal: -12,
-                lastScript: "",
-                sampleLoaded: true,
-                currentUrl: ""
-            };
-            tracks.push(newTrack);
-            renderMixer();
-        }
 
         function renderMixer() {
             const list = document.getElementById('track-list');
@@ -1065,16 +1027,21 @@ console.log("Plugin Applied: Noise Filter Active");</textarea>
         }
         async function importMIDI(e) {
             const file = e.target.files[0];
-            const midi = await Midi.fromUrl(URL.createObjectURL(file));
+            if (!file) return;
+            // Read file as ArrayBuffer to avoid createObjectURL overload issues
+            const arrayBuffer = await file.arrayBuffer();
+            const midi = new Midi(arrayBuffer);
             tracks = [];
+            const bpm = (midi.header.tempos && midi.header.tempos[0] && midi.header.tempos[0].bpm) ? midi.header.tempos[0].bpm : parseFloat(document.getElementById('bpm').value) || 120;
             midi.tracks.forEach(t => {
-                if (t.notes.length === 0) return;
+                if (!t.notes || t.notes.length === 0) return;
                 addNewTrack(t.name || "MIDI Track");
                 const nt = tracks[tracks.length - 1];
                 t.notes.forEach(n => {
                     const row = NOTES.indexOf(n.name);
-                    const col = Math.round(n.time * (midi.header.tempos[0].bpm / 60) * 4);
-                    const len = Math.round(n.duration * (midi.header.tempos[0].bpm / 60) * 4) || 1;
+                    // convert time (seconds) to grid columns (16th notes)
+                    const col = Math.round((n.time || 0) * (bpm / 60) * 4);
+                    const len = Math.max(1, Math.round((n.duration || 0) * (bpm / 60) * 4));
                     if (row !== -1) nt.notes.push({
                         row,
                         col,
@@ -1163,56 +1130,72 @@ console.log("Plugin Applied: Noise Filter Active");</textarea>
                 initGrid();
                 renderMixer();
                 renderNotes();
-                document.getElementById('plugin-code').value = tracks[activeTrackIdx] ? .lastScript || "";
+                document.getElementById('plugin-code').value = tracks[activeTrackIdx] ? (tracks[activeTrackIdx].lastScript || "") : "";
                 updateEditor();
             };
             reader.readAsText(file);
         }
         async function exportMIDI() {
-            const mTracks = tracks.map(t => {
-                const track = new MidiWriter.Track();
-                // Добавляем темп в MIDI файл
-                track.setTempo(document.getElementById('bpm').value);
+            // Build MIDI using @tonejs/midi (already loaded as Midi)
+            try {
+                const midiOut = new Midi();
+                const bpm = parseFloat(document.getElementById('bpm').value) || 120;
+                midiOut.header.setTempo(bpm);
 
-                t.notes.forEach(n => {
-                    track.addEvent(new MidiWriter.NoteEvent({
-                        pitch: NOTES[n.row],
-                        duration: 'T' + (n.len * 128),
-                        startTick: n.col * 128
-                    }));
-                });
-                return track;
-            });
-
-            const write = new MidiWriter.Writer(mTracks);
-            const midiBase64 = write.buildFile(); // Это Uint8Array
-
-            // Пытаемся вызвать системное окно сохранения (File System Access API)
-            if (window.showSaveFilePicker) {
-                try {
-                    const handle = await window.showSaveFilePicker({
-                        suggestedName: 'my_composition.mid',
-                        types: [{
-                            description: 'MIDI File',
-                            accept: {
-                                'audio/midi': ['.mid']
-                            },
-                        }],
+                tracks.forEach(t => {
+                    const mTrack = midiOut.addTrack();
+                    mTrack.name = t.name || 'Track';
+                    t.notes.forEach(n => {
+                        // convert grid col/len (16th steps) into beats
+                        const startBeats = n.col / 4; // 4 sixteenths per beat
+                        const durBeats = Math.max(1, n.len) / 4;
+                        const startSeconds = startBeats * (60 / bpm);
+                        const durSeconds = durBeats * (60 / bpm);
+                        // addNote accepts time/duration in seconds
+                        mTrack.addNote({
+                            name: NOTES[n.row],
+                            time: startSeconds,
+                            duration: durSeconds
+                        });
                     });
-                    const writable = await handle.createWritable();
-                    await writable.write(new Blob([write.buildFile()], {
-                        type: 'audio/midi'
-                    }));
-                    await writable.close();
-                } catch (err) {
-                    console.log("Сохранение отменено или не поддерживается");
+                });
+
+                const bytes = midiOut.toArray(); // Uint8Array
+                // Try File System Access API first
+                if (window.showSaveFilePicker) {
+                    try {
+                        const handle = await window.showSaveFilePicker({
+                            suggestedName: 'my_composition.mid',
+                            types: [{
+                                description: 'MIDI File',
+                                accept: {
+                                    'audio/midi': ['.mid']
+                                }
+                            }]
+                        });
+                        const writable = await handle.createWritable();
+                        await writable.write(new Blob([bytes], {
+                            type: 'audio/midi'
+                        }));
+                        await writable.close();
+                        return;
+                    } catch (err) {
+                        console.log('Save cancelled or not permitted, falling back to download');
+                    }
                 }
-            } else {
-                // Запасной вариант для старых браузеров
+
+                // Fallback download link
+                const blob = new Blob([bytes], {
+                    type: 'audio/midi'
+                });
                 const link = document.createElement('a');
-                link.href = write.dataUri();
+                link.href = URL.createObjectURL(blob);
                 link.download = 'track.mid';
                 link.click();
+                URL.revokeObjectURL(link.href);
+            } catch (err) {
+                console.error('MIDI export failed:', err);
+                alert('MIDI export failed: ' + err.message);
             }
         }
         addNewTrack("Bass Piano");
