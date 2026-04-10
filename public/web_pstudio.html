@@ -1,16 +1,16 @@
 <!DOCTYPE html>
 <html lang="ru">
-
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Web PStudio | Ultimate Engine</title>
+    
     <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
     <script src="https://unpkg.com/@tonejs/midi"></script>
     <script src="https://cdn.jsdelivr.net/npm/midi-writer-js@2.1.4/browser/index.js"></script>
 
     <style>
-         :root {
+        :root {
             --bg: #0b0c0f;
             --panel: #16181d;
             --accent: #ffa500;
@@ -18,176 +18,91 @@
             --accent-glow: rgba(255, 165, 0, 0.4);
             --border: #2a2d34;
             --text: #c0c0c0;
-            --grid-bg: #131418;
         }
-        
-        body,
-        html {
-            margin: 0;
-            padding: 0;
-            height: 100%;
-            width: 100%;
-            background: var(--bg);
-            color: var(--text);
-            font-family: 'Segoe UI', Roboto, sans-serif;
-            overflow: hidden;
-            display: flex;
-            flex-direction: column;
+
+        body, html {
+            margin: 0; padding: 0; height: 100%; width: 100%;
+            background: var(--bg); color: var(--text);
+            font-family: 'Segoe UI', sans-serif; overflow: hidden;
+            display: flex; flex-direction: column;
         }
-        /* BEAUTIFUL LOGO AT THE TOP */
-        
+
+        /* NAVBAR Оптимизация под рекламу */
         .navbar {
-            height: 60px;
+            height: 70px; /* Чуть увеличили высоту для баннера */
             background: #000;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0 20px;
-            border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 0 20px; border-bottom: 1px solid var(--border);
             z-index: 1000;
         }
-        
-        .logo-text {
-            font-weight: 900;
-            letter-spacing: 2px;
-            color: var(--accent);
-            text-shadow: 0 0 10px var(--accent-glow);
-            font-size: 1.2rem;
-            text-transform: uppercase;
-        }
-        
-        .nav-btns {
-            display: flex;
-            gap: 10px;
-        }
-        
-        .nav-btn {
-            background: var(--panel);
-            border: 1px solid var(--border);
-            color: var(--text);
-            padding: 8px 15px;
-            cursor: pointer;
-            border-radius: 4px;
-            font-weight: bold;
-            text-transform: uppercase;
-            transition: 0.3s;
-            font-size: 12px;
-        }
-        
-        .nav-btn:hover {
-            border-color: var(--accent);
-            color: #fff;
-        }
-        /* ELEMENT FIELD WITH SHIFT CAPABILITY */
-        
-        .page-container {
+
+        .ad-top-container {
             flex-grow: 1;
-            position: relative;
-            overflow-x: auto;
-            /* Allows shifting sideways if content is wider than screen */
-            overflow-y: hidden;
-            display: flex;
+            display: flex; justify-content: center;
+            max-height: 60px; overflow: hidden;
+            margin: 0 20px;
         }
-        
-        .page {
-            display: none;
-            width: 100%;
-            height: 100%;
-            flex-shrink: 0;
-            /* Reduce scale of elements inside if needed (scale 0.9 = 90%) */
-            transform-origin: top left;
+
+        .nav-btns { display: flex; gap: 10px; }
+
+        .nav-btn {
+            background: var(--panel); border: 1px solid var(--border);
+            color: var(--text); padding: 8px 15px; cursor: pointer;
+            border-radius: 4px; font-weight: bold; text-transform: uppercase;
+            transition: 0.3s; font-size: 11px;
         }
-        
-        .page.active {
-            display: block;
+
+        .nav-btn:hover { border-color: var(--accent); color: #fff; }
+
+        /* Рабочая область */
+        .page-container { flex-grow: 1; display: flex; position: relative; }
+
+        .page { display: none; width: 100%; height: 100%; }
+        .page.active { display: block; }
+
+        iframe { width: 100%; height: 100%; border: none; }
+
+        /* Рекламный блок внутри страницы (Desktop) */
+        .ad-sidebar {
+            position: absolute; right: 10px; top: 10px;
+            width: 300px; height: 250px;
+            z-index: 100; background: rgba(0,0,0,0.5);
+            border-radius: 8px; overflow: hidden;
         }
-        /* Если экран маленький, принудительно уменьшаем содержимое */
-        
-        @media screen and (max-width: 768px) {
-            .logo-text {
-                font-size: 0.9rem;
-            }
-            .page.active {
-                width: 120%;
-                /* Делаем рабочее поле шире экрана */
-                transform: scale(0.83);
-                /* Но уменьшаем его, чтобы влезло больше кнопок */
-            }
-        }
-        
-        iframe {
-            width: 100%;
-            height: 100%;
-            border: none;
-        }
-        /* ПРЕВЬЮ ПАНЕЛЬ */
-        
+
+        /* Превью панель */
         .preview-panel {
-            position: fixed;
-            bottom: -100%;
-            left: 0;
-            width: 100%;
-            height: 55vh;
-            background: var(--panel);
-            border-top: 3px solid var(--accent);
+            position: fixed; bottom: -100%; left: 0; width: 100%; height: 55vh;
+            background: var(--panel); border-top: 3px solid var(--accent);
             transition: 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.2);
-            z-index: 2000;
-            display: flex;
-            padding: 20px;
-            box-sizing: border-box;
-            gap: 20px;
+            z-index: 2000; display: flex; padding: 20px; box-sizing: border-box; gap: 20px;
         }
-        
-        .preview-panel.open {
-            bottom: 0;
-        }
-        
-        .preview-panel.type-3d {
-            border-top-color: var(--accent-3d);
-        }
-        
-        .preview-img {
-            width: 300px;
-            height: 100%;
-            background: #000 center/cover;
-            border-radius: 8px;
-            border: 1px solid var(--border);
-        }
-        
-        .launch-btn {
-            background: var(--accent);
-            color: #000;
-            border: none;
-            padding: 15px 30px;
-            font-weight: 900;
-            cursor: pointer;
-            border-radius: 4px;
-            text-transform: uppercase;
-            margin-top: 15px;
-        }
-        
-        .overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.85);
-            display: none;
-            z-index: 1500;
-            backdrop-filter: blur(4px);
-        }
-        
-        .overlay.active {
-            display: block;
-        }
+        .preview-panel.open { bottom: 0; }
+        .preview-img { width: 300px; height: 100%; background: #000 center/cover; border-radius: 8px; }
+        .launch-btn { background: var(--accent); color: #000; border: none; padding: 15px 30px; font-weight: 900; cursor: pointer; border-radius: 4px; margin-top: 15px; }
+
+        .overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.85); display: none; z-index: 1500; backdrop-filter: blur(4px); }
+        .overlay.active { display: block; }
     </style>
 </head>
-
 <body>
 
     <div class="navbar">
-        <div class="logo-text">WEB PSTUDIO</div>
+        <div class="logo-text" style="color: var(--accent); font-weight: 900;">WEB PSTUDIO</div>
+        
+        <div class="ad-top-container">
+            <script type="text/javascript">
+                atOptions = {
+                    'key' : '461fc1b30ddf891492b673d9f9ce6b0b',
+                    'format' : 'iframe',
+                    'height' : 90,
+                    'width' : 728,
+                    'params' : {}
+                };
+            </script>
+            <script type="text/javascript" src="//www.highperformanceformat.com/461fc1b30ddf891492b673d9f9ce6b0b/invoke.js"></script>
+        </div>
+
         <div class="nav-btns">
             <button class="nav-btn" onclick="openPreview('audio')">Audio Editor</button>
             <button class="nav-btn" onclick="openPreview('d')">3D Editor</button>
@@ -196,6 +111,18 @@
 
     <div class="page-container">
         <div id="page-audio" class="page">
+            <div class="ad-sidebar">
+                <script type="text/javascript">
+                    atOptions = {
+                        'key' : 'e12a683813d15c90e3c07907f05208ae',
+                        'format' : 'iframe',
+                        'height' : 250,
+                        'width' : 300,
+                        'params' : {}
+                    };
+                </script>
+                <script type="text/javascript" src="//www.highperformanceformat.com/e12a683813d15c90e3c07907f05208ae/invoke.js"></script>
+            </div>
             <iframe id="daw-frame" src="about:blank"></iframe>
         </div>
 
@@ -208,27 +135,15 @@
     <div class="preview-panel" id="previewPanel">
         <div class="preview-img" id="prevImg"></div>
         <div class="preview-info">
-            <div id="mdContent" class="md-content"></div>
+            <div id="mdContent"></div>
             <button class="launch-btn" id="launchBtn">Перейти к работе</button>
         </div>
     </div>
 
     <script>
         const docs = {
-            audio: {
-                title: "## Audio Editor v2.4",
-                text: "Документация модуля: <br><ul><li><code>Tone.js Engine</code></li><li><code>MIDI Export</code></li></ul>",
-                img: "https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=500",
-                typeClass: "",
-                file: "audio.html"
-            },
-            d: {
-                title: "## 3D Visualizer v1.0",
-                text: "Документация модуля: <br><ul><li><code>WebGL Rendering</code></li><li><code>Scene Edit</code></li></ul>",
-                img: "https://images.unsplash.com/photo-1633167606207-d840b5070fc2?w=500",
-                typeClass: "type-3d",
-                file: "3d.html"
-            }
+            audio: { title: "Audio Editor v2.4", text: "Tone.js Engine, MIDI Export", img: "https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=500", file: "audio.html" },
+            d: { title: "3D Visualizer v1.0", text: "WebGL Rendering, Scene Edit", img: "https://images.unsplash.com/photo-1633167606207-d840b5070fc2?w=500", file: "3d.html" }
         };
 
         let activeTarget = '';
@@ -238,9 +153,7 @@
             const data = docs[type];
             document.getElementById('mdContent').innerHTML = `<h2>${data.title}</h2><p>${data.text}</p>`;
             document.getElementById('prevImg').style.backgroundImage = `url(${data.img})`;
-            const panel = document.getElementById('previewPanel');
-            panel.className = 'preview-panel ' + data.typeClass;
-            panel.classList.add('open');
+            document.getElementById('previewPanel').classList.add('open');
             document.getElementById('overlay').classList.add('active');
         }
 
@@ -253,7 +166,8 @@
             const data = docs[activeTarget];
             closePreview();
             document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-            document.getElementById('page-' + activeTarget).classList.add('active');
+            const targetPage = document.getElementById('page-' + activeTarget);
+            targetPage.classList.add('active');
 
             const frameId = activeTarget === 'audio' ? 'daw-frame' : 'three-frame';
             const frame = document.getElementById(frameId);
@@ -261,5 +175,4 @@
         };
     </script>
 </body>
-
 </html>
