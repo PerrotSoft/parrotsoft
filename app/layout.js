@@ -138,57 +138,122 @@ export async function setBalance(username, newBalance) {
     return { success: false, error: e.message };
   }
 }
-export async function addBalance(username, amount) {
-  'use server';
-  await ensureTables();
-  // Создаем ID транзакции
-  const tid = Math.random().toString(36).substring(7);
-  
-  // Сохраняем в БД временную запись (нужно добавить таблицу transactions)
-  await client.execute({
-    sql: "INSERT INTO transactions (id, user, amount, status) VALUES (?, ?, ?, 'pending')",
-    args: [tid, username, Number(amount)]
-  });
+// Используйте эти ключи (исправлены опечатки n->N, l->I, c->C)
+const PAYPAL_CLIENT = 'AQuNzjMd1mxmH7Q9wItXnsric6qHa-N84XEA-YsiJqLU_h-AweQ50AmtHrQcCLni3WiNJb9QsveBdnDU';
+const PAYPAL_SECRET = 'EKGTwjxL3qYZXqpyL5lFaMgK029sa4XCwH_nn_Wi4VgPiYGCtx1h9cWT3YgXi7OFB9HOSMi7wLU1IB0v';
+const PAYPAL_API = 'https://api-m.sandbox.paypal.com';
 
-  // Возвращаем ссылку на страницу, которая будет в окошке
-  return { success: true, payUrl: `/pay?id=${tid}&amount=${amount}` };
+async function getPayPalToken() {
+    try {
+        const auth = Buffer.from(`${PAYPAL_CLIENT}:${PAYPAL_SECRET}`).toString('base64');
+        const response = await fetch(`${PAYPAL_API}/v1/oauth2/token`, {
+            method: 'POST',
+            body: 'grant_type=client_credentials',
+            headers: {
+                'Authorization': `Basic ${auth}`,
+                'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            cache: 'no-store'
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            console.error("[SERVER] Ошибка авторизации PayPal:", errorData);
+            return null;
+        }
+
+        const data = await response.json();
+        return data.access_token;
+    } catch (e) {
+        console.error("[SERVER] Ошибка при получении токена:", e.message);
+        return null;
+    }
 }
-// Эту функцию будет вызывать страница оплаты ПОСЛЕ того, как "деньги получены"
-export async function finalizePayment(transactionId) {
-  'use server';
-  try {
-    // Проверяем, существует ли транзакция и не оплачена ли она уже
-    const res = await client.execute({
-      sql: "SELECT * FROM transactions WHERE id = ? AND status = 'pending'",
-      args: [transactionId]
-    });
 
-    if (res.rows.length === 0) return { success: false, error: "Invalid or already paid" };
-    
-    const trans = res.rows[0];
-    const username = trans.user;
-    const amount = Number(trans.amount);
+export async function createPaySession(username, amount) {
+    'use server';
+    try {
+        console.log(`[SERVER] Попытка создания оплаты для ${username} на сумму ${amount}`);
 
-    // НАЧИСЛЯЕМ ДЕНЬГИ
-    const userData = await getRawUserData(username);
-    userData.balance = (Number(userData.balance) || 0) + amount;
+        const token = await getPayPalToken();
+        if (!token) return null;
 
-    // Обновляем пользователя
-    await client.execute({
-      sql: "UPDATE users SET data = ? WHERE username = ?",
-      args: [JSON.stringify(userData), username]
-    });
+        // Лимит Sandbox обычно 5000-10000 USD. Сумма 54543 слишком велика.
+        // Для теста принудительно ограничим сумму, если она огромная.
+        let safeAmount = parseFloat(amount);
+        if (safeAmount > 5000) safeAmount = 5000; 
 
-    // Закрываем транзакцию
-    await client.execute({
-      sql: "UPDATE transactions SET status = 'completed' WHERE id = ?",
-      args: [transactionId]
-    });
+        const res = await fetch(`${PAYPAL_API}/v2/checkout/orders`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({
+                intent: 'CAPTURE',
+                purchase_units: [{
+                    amount: {
+                        currency_code: 'USD',
+                        value: safeAmount.toFixed(2)
+                    },
+                    custom_id: username
+                }]
+            }),
+            cache: 'no-store'
+        });
 
-    return { success: true, newBalance: userData.balance };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
+        const order = await res.json();
+
+        if (order.id) {
+            console.log("[SERVER] Сессия создана:", order.id);
+            return order.id;
+        } else {
+            console.error("[SERVER] PayPal вернул ошибку:", JSON.stringify(order, null, 2));
+            return null;
+        }
+    } catch (error) {
+        console.error("[SERVER] Критическая ошибка:", error);
+        return null;
+    }
+}
+
+export async function finalizeAndAddBalance(orderID, username) {
+    'use server';
+    try {
+        const token = await getPayPalToken();
+        if (!token) return { success: false };
+
+        const res = await fetch(`${PAYPAL_API}/v2/checkout/orders/${orderID}/capture`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+            },
+            cache: 'no-store'
+        });
+
+        const data = await res.json();
+
+        if (data.status === 'COMPLETED') {
+            const paidAmount = data.purchase_units[0].payments.captures[0].amount.value;
+            
+            // Здесь ваша логика обновления БД (ensureTables, getRawUserData и т.д.)
+            // Пример:
+            const userData = await getRawUserData(username);
+            userData.balance = (Number(userData.balance) || 0) + Number(paidAmount);
+            
+            await client.execute({
+                sql: "UPDATE users SET data = ? WHERE username = ?",
+                args: [JSON.stringify(userData), username]
+            });
+
+            return { success: true, newBalance: userData.balance };
+        }
+        console.warn("[SERVER] Оплата не завершена. Статус:", data.status);
+    } catch (e) {
+        console.error("[SERVER] Ошибка захвата средств:", e);
+    }
+    return { success: false };
 }
 export default async function RootLayout({ children }) {
   await ensureTables();
@@ -221,7 +286,8 @@ export default async function RootLayout({ children }) {
             getProjects,
             getBalance,
             setBalance,
-            addBalance
+createPaySession,
+    finalizeAndAddBalance
           }}
         >
           {children}

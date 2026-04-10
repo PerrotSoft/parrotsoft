@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 import * as actions from '../actions';
-
+import CallWindow from './CallWindow';
 const ALL_EMOJIS = [
   "💻", "🖥️", "⌨️", "🖱️", "💾", "💿", "📀", "📡", "🔋", "🔌", "⚙️", "🔧", "🔨", "🔩", "🏗️", "🧱",
   "📦", "📂", "📁", "📄", "📃", "📑", "📊", "📈", "📉", "🔍", "🔎", "🔐", "🔓", "🔑", "🛡️", "🧬",
@@ -35,6 +35,9 @@ export default function WevyChat() {
     const groupIconRef = useRef(null);
     const [showCreateModal, setShowCreateModal] = useState(false);
     const [isSidebarVisible, setIsSidebarVisible] = useState(true);
+    const [inCall, setInCall] = useState(false);
+    const [activeCallInfo, setActiveCallInfo] = useState(null);
+    const [isCalling, setIsCalling] = useState(false); // Для исходящего вызова
     const [newChatData, setNewChatData] = useState({
         title: "",
         type: "group",
@@ -57,7 +60,22 @@ export default function WevyChat() {
         setCurrentUser(saved);
         loadMyChats(saved);
     }, []);
+    // Проверка, идет ли сейчас звонок в этом чате
+    useEffect(() => {
+        const checkCalls = async () => {
+            if (!active) return;
+            try {
+                const call = await actions.checkActiveCall(active.id);
+                setActiveCallInfo(call);
+            } catch (e) {
+                console.error("Call check error:", e);
+            }
+        };
 
+        checkCalls();
+        const interval = setInterval(checkCalls, 5000); // Проверяем раз в 5 секунд
+        return () => clearInterval(interval);
+    }, [active]);
     useEffect(() => {
         if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }, [msgs]);
@@ -215,6 +233,22 @@ export default function WevyChat() {
         setSelected([]);
         const updatedMsgs = await actions.getMsgs(active.id);
         setMsgs(updatedMsgs);
+    };
+    const handleStartCall = async () => {
+        if (!active || !currentUser) return;
+        await actions.startCallNotification(active.id, currentUser);
+        setInCall(true);
+    };
+
+    const handleJoinCall = () => {
+        setInCall(true);
+    };
+    
+    const handleEndCall = async () => {
+        if (active) {
+            await actions.endCallNotification(active.id);
+        }
+        setInCall(false);
     };
     const onIconChange = async (e, chatId) => {
         const file = e.target.files[0];
@@ -374,8 +408,18 @@ export default function WevyChat() {
                         <header className="chat-header">
                             <div className="header-info">
                                 <strong>{active.title}</strong>
-                                <span>  {msgs.length} messages</span>
+                                <span> {msgs.length} messages</span>
+                                <div className="call-controls" style={{ display: 'flex', gap: '10px' }}>
+                                    {!inCall && !activeCallInfo && (
+                                        <button onClick={handleStartCall} className="call-btn start">📞</button>
+                                    )}
+
+                                    {!inCall && activeCallInfo && (
+                                        <button onClick={handleJoinCall} className="call-btn join">📞 Join</button>
+                                    )}
+                                </div>
                             </div>
+
                             {selected.length > 0 && (
                                 <div className="batch-actions">
                                     <button onClick={deleteSelected} className="del-btn">Delete ({selected.length})</button>
@@ -494,6 +538,13 @@ export default function WevyChat() {
                     }
                 }} 
             />
+            {inCall && activeCallInfo && (
+                <CallWindow 
+                    currentUser={currentUser} 
+                    activeCall={activeCallInfo} 
+                    onEnd={handleEndCall} 
+                />
+            )}
             <style jsx>{`
                 .app { display: flex; height: 100vh; background: #000; color: #fff; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
                 .sidebar { width: 320px; border-right: 1px solid #111; background: #050505; display: flex; flex-direction: column; }
@@ -512,6 +563,26 @@ export default function WevyChat() {
                     justify-content: center;
                     overflow: hidden;
                     position: relative;
+                }
+                .call-btn {
+                    border: none;
+                    border-radius: 8px;
+                    padding: 8px 15px;
+                    cursor: pointer;
+                    font-weight: bold;
+                    transition: 0.3s;
+                }
+                .call-btn.start { background: #222; color: #0070f3; }
+                .call-btn.join { 
+                    background: #0070f3; 
+                    color: white; 
+                    animation: pulse-blue 2s infinite; 
+                }
+
+                @keyframes pulse-blue {
+                    0% { box-shadow: 0 0 0 0 rgba(0, 112, 243, 0.4); }
+                    70% { box-shadow: 0 0 0 10px rgba(0, 112, 243, 0); }
+                    100% { box-shadow: 0 0 0 0 rgba(0, 112, 243, 0); }
                 }
                 .search-item {
                     display: flex;
@@ -752,6 +823,7 @@ export default function WevyChat() {
                     background: #111;
                 }
             `}</style>
+            
         </div>
     );
 }

@@ -43,7 +43,7 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
         }
     }, [dbActions]);
     useEffect(() => {
-        const username = localStorage.getItem('p_user') || "poly"; // Или из куки
+        const username = localStorage.getItem('p_user') || "poly";
         if (dbActions?.getBalance) {
             dbActions.getBalance(username).then(setBalance);
         }
@@ -91,17 +91,15 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
         }
     };
     const handlePaymentClick = async () => {
-    const amount = 500; // или значение из инпута
+    const amount = 500;
     const res = await dbActions.addBalance(user.username, amount);
 
     if (res.success && res.payUrl) {
-        // Параметры для "отдельного окна"
         const width = 450;
         const height = 600;
         const left = (window.screen.width / 2) - (width / 2);
         const top = (window.screen.height / 2) - (height / 2);
 
-        // window.open с этими параметрами создаст маленькое окно без вкладок
         const payWindow = window.open(
             res.payUrl, 
             'ParrotPaySystem', 
@@ -109,7 +107,7 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
         );
 
         if (!payWindow) {
-            alert("Браузер заблокировал окно оплаты! Разрешите всплывающие окна.");
+            alert("The browser blocked the payment window! Allow pop-ups.");
         }
     }
 };
@@ -126,10 +124,11 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
                         { id: '1', name: 'Search', icon: '🔍', url: '/' },
                         { id: '2', name: 'Settings', icon: '⚙️', url: 'sys:settings' },
                         { id: '3', name: 'Drive', icon: '📂', url: '/drive' },
-                        { id: '4', name: 'DataPedia', icon: '📄', url: '/DataPedia' },
+                        { id: '4', name: 'DataPedia', icon: '📄', url: '/datapedia' },
                         { id: '5', name: 'WavyChat', icon: '💬', url: '/WavyChat' },
                         { id: '6', name: 'Web-PStudio', icon: '💻', url: '/web_pstudio.html' },
-                        { id: '7', name: 'ParrotOS Installer', icon: '💻', url: '/installer' }
+                        { id: '7', name: 'ParrotOS Installer', icon: '💻', url: '/installer' },
+                        { id: '8', name: 'ParrotOS Pley', icon: '💻', url: '/parrotplay' }
                     ],
                 avatar: ""
             };
@@ -282,6 +281,40 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
                 .app-card:hover .del-app { opacity: 1; }
                 .animate-in { animation: slideUp 0.4s cubic-bezier(0, 0.55, 0.45, 1); }
                 @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+                /* Обновление основного контейнера лаунчера */
+.launcher-grid { 
+    position: fixed; 
+    top: 75px; 
+    right: 15px; 
+    width: 320px; 
+    padding: 20px; 
+    border-radius: 25px; 
+    z-index: 999; 
+    display: flex; 
+    flex-direction: column;
+    max-height: 85vh; /* Не выходит за пределы экрана */
+    overflow: hidden;
+}
+
+/* Контейнер для списка приложений с прокруткой */
+.launcher-scroll-area {
+    overflow-y: auto;
+    padding-right: 5px;
+    /* Ограничитель 3х5: высота примерно 5 рядов по 95px */
+    max-height: 475px; 
+}
+
+/* Стилизация полосы прокрутки (тонкий скролл) */
+.launcher-scroll-area::-webkit-scrollbar {
+    width: 4px;
+}
+.launcher-scroll-area::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 10px;
+}
+.launcher-scroll-area::-webkit-scrollbar-track {
+    background: transparent;
+}
             `}</style>
 
             <header className="island-nav block-v1" style={{ border: '1px solid var(--border-light)' }}>
@@ -297,19 +330,24 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
 
             {launcherOpen && (
                 <div className="block-v1 launcher-grid animate-in" style={{ border: '1px solid var(--border-light)', boxShadow: 'var(--shadow-elevated)' }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px' }}>
-                        {user.apps.map((app, i) => (
-                            <div key={app.id} className="app-card" draggable onDragStart={() => setDraggedIdx(i)} onDragOver={e => e.preventDefault()} onDrop={() => onDrop(i)}>
-                                <button className="del-app" onClick={(e) => { e.stopPropagation(); sync({...user, apps: user.apps.filter(a => a.id !== app.id)}); }}>×</button>
-                                <div className="app-icon" style={{ width: 60, height: 60, background: 'white', borderRadius: 16, display: 'flex', justifyContent: 'center', alignItems: 'center', fontSize: 26, boxShadow: 'var(--shadow-flat)', cursor: 'pointer' }} onClick={() => {
-                                    if(app.url === 'sys:settings') setView('settings');
-                                    else window.location.href = app.url;
-                                    setLauncherOpen(false);
-                                }}>{app.icon}</div>
-                                <span style={{ fontSize: 10, fontWeight: 600 }}>{app.name}</span>
-                            </div>
-                        ))}
+                    {/* Обертка для прокрутки */}
+                    <div className="launcher-scroll-area">
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px' }}>
+                            {user.apps.map((app, i) => (
+                                <div key={app.id} className="app-card" draggable onDragStart={() => setDraggedIdx(i)} onDragOver={e => e.preventDefault()} onDrop={() => onDrop(i)}>
+                                    <button className="del-app" onClick={(e) => { e.stopPropagation(); sync({...user, apps: user.apps.filter(a => a.id !== app.id)}); }}>×</button>
+                                    <div className="app-icon" style={{ width: 60, height: 60, background: 'white', borderRadius: 16, display: 'flex', justifyContent: 'center', alignItems: 'center', fontSize: 26, boxShadow: 'var(--shadow-flat)', cursor: 'pointer' }} onClick={() => {
+                                        if(app.url === 'sys:settings') setView('settings');
+                                        else window.location.href = app.url;
+                                        setLauncherOpen(false);
+                                    }}>{app.icon}</div>
+                                    <span style={{ fontSize: 10, fontWeight: 600, textAlign: 'center' }}>{app.name}</span>
+                                </div>
+                            ))}
+                        </div>
                     </div>
+                    
+                    {/* Кнопка добавления остается за пределами скролла, чтобы всегда быть на виду */}
                     <button className="btn-v4" style={{ width: '100%', marginTop: 20, borderRadius: 12 }} onClick={() => { setModalOpen(true); setLauncherOpen(false); }}>+ Shortcut</button>
                 </div>
             )}
@@ -381,7 +419,9 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
                             setView('main');
                         }}>Save</button>
                         <div style={{ background: 'rgba(255,255,255,0.05)', padding: '15px', borderRadius: '20px', marginBottom: '20px' }}>
-                            <p style={{ fontSize: '14px', opacity: 0.7, marginBottom: '10px' }}>Current Balance: <b>{balance} pc</b></p>
+                            <p style={{ fontSize: '14px', opacity: 0.7, marginBottom: '10px' }}>
+                                Current Balance: <b>{balance} pc</b>
+                            </p>
                             <div style={{ display: 'flex', gap: '10px' }}>
                                 <input 
                                     className="inp-v1" 
@@ -391,18 +431,48 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
                                     style={{ flex: 1, marginBottom: 0 }} 
                                 />
                                 <button className="btn-v4" style={{ width: 'auto', padding: '0 20px' }} onClick={async () => {
-                                    const amount = document.getElementById('add_amount').value;
-                                    if (!amount || amount <= 0) return alert("Введите сумму!");
-                                    
-                                    const res = await dbActions.addBalance(user.username, amount);
-                                    if (res.success) {
-                                        setBalance(res.newBalance);
-                                        document.getElementById('add_amount').value = '';
-                                        alert(`Зачислено ${amount} pc!`);
-                                    }
-                                }}>
-                                    add Pey Coins
-                                </button>
+    const amountInput = document.getElementById('add_amount');
+    const amount = amountInput.value;
+    
+    console.log(`[CLIENT] Нажата кнопка оплаты. Сумма: ${amount}`);
+    if (!amount || amount <= 0) return alert("Введите сумму!");
+
+    console.log("[CLIENT] Отправка запроса на сервер для создания сессии...");
+    console.log(user.username, amount);
+    const orderID = await dbActions.createPaySession(user.username, amount);
+    console.log("[CLIENT] Ответ от сервера получен. OrderID:", orderID);
+    if (orderID) {
+        console.log(`[CLIENT] Сессия получена. ID заказа: ${orderID}`);
+        const payUrl = `https://www.sandbox.paypal.com/checkoutnow?token=${orderID}`;
+        
+        console.log("[CLIENT] Открытие окна PayPal...");
+        const payWin = window.open(payUrl, 'PayPal', 'width=450,height=600');
+
+        const timer = setInterval(async () => {
+            if (payWin.closed) {
+                console.log("[CLIENT] Окно PayPal закрыто пользователем. Начинаем проверку...");
+                clearInterval(timer);
+                
+                const res = await dbActions.finalizeAndAddBalance(orderID, user.username);
+                console.log("[CLIENT] Результат проверки с сервера:", res);
+                
+                if (res.success) {
+                    setBalance(res.newBalance);
+                    amountInput.value = '';
+                    alert(`Баланс пополнен! Новый баланс: ${res.newBalance} pc`);
+                } else {
+                    console.warn("[CLIENT] Сервер не подтвердил оплату.");
+                    alert("Сервер не нашел подтверждения оплаты от PayPal.");
+                }
+            }
+        }, 1000);
+    } else {
+        console.error("[CLIENT] Сервер не вернул orderID. Проверьте логи терминала.");
+        alert("Ошибка при создании сессии оплаты.");
+    }
+}}>
+    add Pey Coins
+</button>
                             </div>
                         </div>
                         <button className="btn-v5" style={{ width: '100%', color: 'red', marginBottom: 10 }} onClick={() => { localStorage.clear(); window.location.reload(); }}>Logout</button>

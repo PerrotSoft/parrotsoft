@@ -149,6 +149,14 @@ export async function initDB() {
       time INTEGER
     )
   `);
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS active_calls (
+      chat_id TEXT PRIMARY KEY,
+      caller TEXT,
+      status TEXT,
+      timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
   
   return { success: true };
 }
@@ -261,8 +269,63 @@ export async function deleteMsgs(ids) {
     args: ids
   });
 }
+export async function joinCall(chatId, username) {
+    'use server';
+    const res = await client.execute({
+        sql: "SELECT participants FROM active_calls WHERE chat_id = ?",
+        args: [chatId]
+    });
+    
+    let parts = res.rows[0]?.participants ? JSON.parse(res.rows[0].participants) : [];
+    if (!parts.includes(username)) parts.push(username);
 
+    await client.execute({
+        sql: "UPDATE active_calls SET participants = ? WHERE chat_id = ?",
+        args: [JSON.stringify(parts), chatId]
+    });
+    return parts;
+}
+export async function startCallNotification(chatId, caller) {
+  'use server';
+  await client.execute({
+    sql: "INSERT INTO active_calls (chat_id, caller, status) VALUES (?, ?, 'active') ON CONFLICT(chat_id) DO UPDATE SET status = 'active', caller = excluded.caller",
+    args: [chatId, caller]
+  });
+  return true;
+}
 
+export async function endCallNotification(chatId) {
+  'use server';
+  await client.execute({
+    sql: "DELETE FROM active_calls WHERE chat_id = ?",
+    args: [chatId]
+  });
+  return true;
+}
+
+export async function checkActiveCall(chatId) {
+  'use server';
+  try {
+    const res = await client.execute({
+      sql: "SELECT * FROM active_calls WHERE chat_id = ?",
+      args: [chatId]
+    });
+
+    if (res.rows.length > 0) {
+      const row = res.rows[0];
+      return {
+        chat_id: String(row.chat_id),
+        caller: String(row.caller),
+        status: String(row.status),
+        timestamp: String(row.timestamp)
+      };
+    }
+    return null;
+  } catch (e) {
+    console.error("Call verification error:", e);
+    return null;
+  }
+}
 
 
 

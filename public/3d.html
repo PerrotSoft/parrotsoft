@@ -111,6 +111,7 @@
             <button class="tab" id="mode-edit" onclick="app.setMode('EDIT')">Edit (Vertex)</button>
             <button class="tab" id="mode-sculpt" onclick="app.setMode('SCULPT')">Sculpt</button>
             <button class="tab" id="mode-render" onclick="app.setMode('RENDER')">Render / Cam</button>
+            <button class="tab" onclick="app.setMode('SCULPT')">Sculpt</button>
         </div>
         <div class="header-actions">
             <button class="btn" onclick="app.exportOBJ()">Export OBJ</button>
@@ -175,6 +176,11 @@
                         <p style="color:var(--text-dim); font-size:9px; margin-bottom: 10px;">Select a vertex (orange sphere) to move it.</p>
                         <button class="btn btn-primary" onclick="app.subdivideSelected()">⚄ SUBDIVIDE MESH</button>
                     </div>
+                    <div class="prop-box">
+                        <button class="btn" onclick="app.setEditSubMode('vertex')">Вершины</button>
+                        <button class="btn" onclick="app.setEditSubMode('edge')">Ребра</button>
+                        <button class="btn" onclick="app.setEditSubMode('face')">Грани</button>
+                    </div>
                 </div>
 
                 <div id="panel-sculpt" style="display: none;">
@@ -217,329 +223,154 @@
     </footer>
 
     <script type="module">
-        import * as THREE from 'three';
-        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-        import { TransformControls } from 'three/addons/controls/TransformControls.js';
-        import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { TransformControls } from 'three/addons/controls/TransformControls.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 
-        class VProEngine {
-            constructor() {
-                this.init();
-                this.setupUI();
-                this.animate();
-            }
+    class VProEngine {
+        constructor() {
+            this.init();
+            this.setupUI();
+            this.animate();
+        }
 
-            init() {
-                this.scene = new THREE.Scene();
-                this.scene.background = new THREE.Color(0x0a0a0a);
-                const container = document.getElementById('viewport');
-                this.camera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.1, 5000);
-                this.camera.position.set(50, 50, 50);
-                
-                this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
-                this.renderer.setSize(container.clientWidth, container.clientHeight);
-                this.renderer.setPixelRatio(window.devicePixelRatio);
-                container.appendChild(this.renderer.domElement);
+        init() {
+            this.scene = new THREE.Scene();
+            this.scene.background = new THREE.Color(0x0a0a0a);
+            const container = document.getElementById('viewport');
+            
+            this.camera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.1, 5000);
+            this.camera.position.set(50, 50, 50);
 
-                // === ИСПРАВЛЕНИЕ: ИНИЦИАЛИЗИРУЕМ МАССИВЫ ДО ДОБАВЛЕНИЯ СВЕТА ===
-                this.objects = [];
-                this.selected = null;
-                this.mode = 'OBJECT';
-                // ===============================================================
+            this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+            this.renderer.setSize(container.clientWidth, container.clientHeight);
+            this.renderer.setPixelRatio(window.devicePixelRatio);
+            this.renderer.shadowMap.enabled = true;
+            container.appendChild(this.renderer.domElement);
 
-                this.ambientLight = new THREE.AmbientLight(0xffffff, 0.4);
-                this.scene.add(this.ambientLight);
-                this.addLight('directional'); // Теперь эта функция сработает без ошибок
+            // Состояние движка
+            this.objects = [];
+            this.sceneCameras = [];
+            this.lights = [];
+            this.selected = null;
+            this.selectedElements = []; // Для хранения выбранных граней/ребер
+            this.mode = 'OBJECT'; 
+            this.editSubMode = 'vertex'; // vertex, edge, face
+            
+            // Скульптинг
+            this.isSculpting = false;
+            this.sculptSettings = { radius: 8, strength: 0.5, invert: false };
 
-                this.grid = new THREE.GridHelper(200, 50, 0x222222, 0x111111);
-                this.scene.add(this.grid);
+            // Свет и сетка
+            this.scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+            this.addLight('directional');
+            this.grid = new THREE.GridHelper(200, 50, 0x222222, 0x111111);
+            this.scene.add(this.grid);
 
-                this.controls = new OrbitControls(this.camera, this.renderer.domElement);
-                this.controls.enableDamping = true;
+            // Контроллеры
+            this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+            this.controls.enableDamping = true;
 
-                this.gizmo = new TransformControls(this.camera, this.renderer.domElement);
-                this.gizmo.addEventListener('dragging-changed', e => this.controls.enabled = !e.value);
-                this.gizmo.addEventListener('change', () => this.syncUIFromObject());
-                this.scene.add(this.gizmo);
-                
-                // For Sculpting
-                this.isSculpting = false;
-                const brushGeo = new THREE.SphereGeometry(1, 16, 16);
-                const brushMat = new THREE.MeshBasicMaterial({ color: 0xff0044, wireframe: true, transparent: true, opacity: 0.3 });
-                this.brushCursor = new THREE.Mesh(brushGeo, brushMat);
-                this.brushCursor.visible = false;
-                this.scene.add(this.brushCursor);
+            this.gizmo = new TransformControls(this.camera, this.renderer.domElement);
+            this.gizmo.addEventListener('dragging-changed', e => this.controls.enabled = !e.value);
+            this.scene.add(this.gizmo);
 
-                this.clock = new THREE.Clock();
-            }
+            this.vertexGroup = new THREE.Group();
+            this.scene.add(this.vertexGroup);
+            
+            this.clock = new THREE.Clock();
+        }
 
-            setupUI() {
-                window.addEventListener('resize', () => {
-                    const c = document.getElementById('viewport');
-                    this.camera.aspect = c.clientWidth / c.clientHeight;
-                    this.camera.updateProjectionMatrix();
-                    this.renderer.setSize(c.clientWidth, c.clientHeight);
-                });
+        setEditSubMode(mode) {
+            this.editSubMode = mode;
+            console.log("Edit Sub-Mode:", mode);
+            // Визуальное обновление кнопок в UI можно добавить здесь
+            this.buildVertexHelpers(); 
+        }
 
-                const vp = document.getElementById('viewport');
-                vp.addEventListener('pointerdown', e => this.handlePointerDown(e));
-                vp.addEventListener('pointermove', e => this.handlePointerMove(e));
-                vp.addEventListener('pointerup', () => this.isSculpting = false);
-                
-                // Bind inputs to transform logic
-                const inputs = ['tr-px', 'tr-py', 'tr-pz', 'tr-rx', 'tr-ry', 'tr-rz', 'tr-sx', 'tr-sy', 'tr-sz'];
-                inputs.forEach(id => {
-                    const el = document.getElementById(id);
-                    if(el) el.addEventListener('input', () => this.applyTransformFromUI());
-                });
-            }
+        setupUI() {
+            window.addEventListener('keydown', (e) => {
+                if (e.key.toLowerCase() === 'e') this.extrude();
+                if (e.key === 'Control') this.sculptSettings.invert = true;
+            });
+            window.addEventListener('keyup', (e) => {
+                if (e.key === 'Control') this.sculptSettings.invert = false;
+            });
 
-            setMode(m) {
-                this.mode = m;
-                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-                document.getElementById(`mode-${m.toLowerCase()}`).classList.add('active');
-                
-                document.getElementById('panel-object').style.display = m === 'OBJECT' ? 'block' : 'none';
-                document.getElementById('panel-edit').style.display = m === 'EDIT' ? 'block' : 'none';
-                document.getElementById('panel-sculpt').style.display = m === 'SCULPT' ? 'block' : 'none';
-                document.getElementById('panel-render').style.display = m === 'RENDER' ? 'block' : 'none';
+            const vp = document.getElementById('viewport');
+            vp.addEventListener('pointerdown', (e) => this.handlePointer(e));
+        }
 
-                if (m === 'SCULPT') {
-                    this.gizmo.detach();
-                    this.controls.enableDamping = false; 
-                } else {
-                    this.brushCursor.visible = false;
-                    this.controls.enableDamping = true;
-                    if (this.selected && m === 'OBJECT') this.gizmo.attach(this.selected);
-                }
-            }
-
-            addObject(type) {
-                // В скульптинге нужна плотная сетка, поэтому сфера создается 64x64
-                let geo = type === 'cube' ? new THREE.BoxGeometry(10, 10, 10, 10, 10, 10).toNonIndexed() : new THREE.SphereGeometry(8, 64, 64).toNonIndexed();
-                
-                // Чтобы вершины можно было двигать индивидуально в режиме Sculpt, нам нужен BufferGeometry без индексов
-                if (geo.index) geo = geo.toNonIndexed();
-                geo.computeVertexNormals();
-
-                const mat = new THREE.MeshStandardMaterial({ color: 0x888888, roughness: 0.5, metalness: 0.1 });
-                const mesh = new THREE.Mesh(geo, mat);
-                mesh.name = `${type.toUpperCase()}_${this.objects.length}`;
-                
-                this.scene.add(mesh);
-                this.objects.push(mesh);
-                this.selectObject(mesh);
-                this.updateOutliner();
-            }
-
-            addLight(type) {
-                const light = new THREE.DirectionalLight(0xffffff, 2);
-                light.position.set(20, 50, 20);
-                light.name = `Light_${this.objects.length}`;
-                this.scene.add(light);
-                this.objects.push(light);
-                this.updateOutliner();
-            }
-
-            handlePointerDown(e) {
-                if (e.button !== 0) return; // Only left click
-                
-                if (this.mode === 'SCULPT' && this.selected && this.selected.isMesh) {
-                    this.isSculpting = true;
-                    this.sculptDirection = e.shiftKey ? -1 : 1;
-                    this.controls.enabled = false; // Disable orbit while sculpting
-                    this.performSculpt(e);
-                    return;
-                }
-
-                const rect = this.renderer.domElement.getBoundingClientRect();
-                const mouse = new THREE.Vector2(
-                    ((e.clientX - rect.left) / rect.width) * 2 - 1,
-                    -((e.clientY - rect.top) / rect.height) * 2 + 1
-                );
-
-                const ray = new THREE.Raycaster();
-                ray.setFromCamera(mouse, this.camera);
-                const hits = ray.intersectObjects(this.objects, true);
-
-                if (hits.length > 0) {
-                    this.selectObject(hits[0].object);
-                } else if (!this.gizmo.dragging) {
-                    this.gizmo.detach();
-                    this.selected = null;
-                    this.updateOutliner();
-                }
-            }
-
-            handlePointerMove(e) {
-                if (this.mode !== 'SCULPT' || !this.selected || !this.selected.isMesh) {
-                    this.brushCursor.visible = false;
-                    return;
-                }
-
-                const rect = this.renderer.domElement.getBoundingClientRect();
-                const mouse = new THREE.Vector2(
-                    ((e.clientX - rect.left) / rect.width) * 2 - 1,
-                    -((e.clientY - rect.top) / rect.height) * 2 + 1
-                );
-
-                const ray = new THREE.Raycaster();
-                ray.setFromCamera(mouse, this.camera);
-                const hits = ray.intersectObject(this.selected, false);
-
-                if (hits.length > 0) {
-                    this.brushCursor.visible = true;
-                    this.brushCursor.position.copy(hits[0].point);
-                    const size = parseFloat(document.getElementById('sculpt-size').value);
-                    this.brushCursor.scale.set(size, size, size);
-
-                    if (this.isSculpting) {
-                        this.performSculpt(e, hits[0]);
-                    }
-                } else {
-                    this.brushCursor.visible = false;
-                }
-            }
-
-            performSculpt(e, hitObj = null) {
-                if (!hitObj) {
-                    const rect = this.renderer.domElement.getBoundingClientRect();
-                    const mouse = new THREE.Vector2(((e.clientX - rect.left) / rect.width) * 2 - 1, -((e.clientY - rect.top) / rect.height) * 2 + 1);
-                    const ray = new THREE.Raycaster();
-                    ray.setFromCamera(mouse, this.camera);
-                    const hits = ray.intersectObject(this.selected, false);
-                    if (hits.length === 0) return;
-                    hitObj = hits[0];
-                }
-
-                const size = parseFloat(document.getElementById('sculpt-size').value);
-                const strength = parseFloat(document.getElementById('sculpt-strength').value) * this.sculptDirection;
-                
-                const posAttr = this.selected.geometry.attributes.position;
-                const normAttr = this.selected.geometry.attributes.normal;
-                
-                // Convert hit point to object's local space
-                const localHit = this.selected.worldToLocal(hitObj.point.clone());
-                let updated = false;
-
-                for (let i = 0; i < posAttr.count; i++) {
-                    const v = new THREE.Vector3().fromBufferAttribute(posAttr, i);
-                    const dist = v.distanceTo(localHit);
-
-                    if (dist < size) {
-                        const falloff = 1 - (dist / size); // Smooth falloff
-                        const n = new THREE.Vector3().fromBufferAttribute(normAttr, i);
-                        v.addScaledVector(n, strength * falloff * 0.5);
-                        posAttr.setXYZ(i, v.x, v.y, v.z);
-                        updated = true;
-                    }
-                }
-
-                if (updated) {
-                    posAttr.needsUpdate = true;
-                    this.selected.geometry.computeVertexNormals();
-                }
-            }
-
-            selectObject(obj) {
-                this.selected = obj;
-                if (this.mode === 'OBJECT') this.gizmo.attach(obj);
-                this.updateOutliner();
-                this.syncUIFromObject();
-            }
-
-            setGizmoMode(m) {
-                this.gizmo.setMode(m);
-                document.querySelectorAll('.tool-btn').forEach(b => b.classList.remove('active'));
-                document.getElementById(`g-${m}`).classList.add('active');
-            }
-
-            syncUIFromObject() {
-                if(!this.selected) return;
-                const s = this.selected;
-                document.getElementById('tr-px').value = s.position.x.toFixed(2);
-                document.getElementById('tr-py').value = s.position.y.toFixed(2);
-                document.getElementById('tr-pz').value = s.position.z.toFixed(2);
-                document.getElementById('tr-rx').value = THREE.MathUtils.radToDeg(s.rotation.x).toFixed(0);
-                document.getElementById('tr-ry').value = THREE.MathUtils.radToDeg(s.rotation.y).toFixed(0);
-                document.getElementById('tr-rz').value = THREE.MathUtils.radToDeg(s.rotation.z).toFixed(0);
-                document.getElementById('tr-sx').value = s.scale.x.toFixed(2);
-                document.getElementById('tr-sy').value = s.scale.y.toFixed(2);
-                document.getElementById('tr-sz').value = s.scale.z.toFixed(2);
-            }
-
-            applyTransformFromUI() {
-                if(!this.selected) return;
-                const s = this.selected;
-                s.position.set(
-                    parseFloat(document.getElementById('tr-px').value),
-                    parseFloat(document.getElementById('tr-py').value),
-                    parseFloat(document.getElementById('tr-pz').value)
-                );
-                s.rotation.set(
-                    THREE.MathUtils.degToRad(parseFloat(document.getElementById('tr-rx').value)),
-                    THREE.MathUtils.degToRad(parseFloat(document.getElementById('tr-ry').value)),
-                    THREE.MathUtils.degToRad(parseFloat(document.getElementById('tr-rz').value))
-                );
-                s.scale.set(
-                    parseFloat(document.getElementById('tr-sx').value),
-                    parseFloat(document.getElementById('tr-sy').value),
-                    parseFloat(document.getElementById('tr-sz').value)
-                );
-            }
-
-            updateOutliner() {
-                const out = document.getElementById('ui-outliner');
-                out.innerHTML = '';
-                this.objects.forEach(o => {
-                    const div = document.createElement('div');
-                    div.className = `out-item ${this.selected === o ? 'active' : ''}`;
-                    div.innerText = o.name || o.type;
-                    div.onclick = (e) => { e.stopPropagation(); this.selectObject(o); };
-                    out.appendChild(div);
-                });
-            }
-
-            exportOBJ() {
-                let objContent = "# V-PRO EXPORT\n";
-                let vertOffset = 1;
-                this.objects.forEach(mesh => {
-                    if(!mesh.geometry || !mesh.isMesh) return;
-                    objContent += `o ${mesh.name}\n`;
-                    const pos = mesh.geometry.attributes.position;
-                    const matrix = mesh.matrixWorld;
-                    for(let i = 0; i < pos.count; i++) {
-                        const v = new THREE.Vector3().fromBufferAttribute(pos, i).applyMatrix4(matrix);
-                        objContent += `v ${v.x.toFixed(4)} ${v.y.toFixed(4)} ${v.z.toFixed(4)}\n`;
-                    }
-                    for(let i = 1; i <= pos.count; i += 3) {
-                        objContent += `f ${i+vertOffset-1} ${i+vertOffset} ${i+vertOffset+1}\n`;
-                    }
-                    vertOffset += pos.count;
-                });
-                const blob = new Blob([objContent], {type: 'text/plain'});
-                const a = document.createElement('a');
-                a.href = URL.createObjectURL(blob);
-                a.download = "scene.obj";
-                a.click();
-            }
-
-            animate() {
-                requestAnimationFrame(() => this.animate());
-                
-                // Restore controls when not actively sculpting
-                if (this.mode === 'SCULPT' && !this.isSculpting) {
-                    this.controls.enabled = true;
-                }
-
-                if (this.controls.enableDamping) this.controls.update();
-                this.renderer.render(this.scene, this.camera);
-                
-                document.getElementById('st-fps').innerText = `FPS: ${Math.round(1/this.clock.getDelta())}`;
+        handlePointer(e) {
+            if (this.mode === 'SCULPT') {
+                this.isSculpting = true;
+                this.performSculpt(e);
+            } else {
+                this.handleSelection(e);
             }
         }
 
-        window.app = new VProEngine();
-    </script>
+        // Логика скульптинга (втягивание/вытягивание)
+        performSculpt(e) {
+            const hit = this.getRayHit(e);
+            if (!hit || !this.selected) return;
+
+            const pos = this.selected.geometry.attributes.position;
+            const normal = this.selected.geometry.attributes.normal;
+            const matrix = this.selected.matrixWorld;
+            const localHit = hit.point.clone().applyMatrix4(new THREE.Matrix4().copy(matrix).invert());
+
+            const distLimit = this.sculptSettings.radius;
+            const strength = this.sculptSettings.strength * (this.sculptSettings.invert ? -1 : 1);
+
+            for (let i = 0; i < pos.count; i++) {
+                const v = new THREE.Vector3().fromBufferAttribute(pos, i);
+                const d = v.distanceTo(localHit);
+                if (d < distLimit) {
+                    const falloff = (1 - d / distLimit) ** 2;
+                    const vNormal = new THREE.Vector3().fromBufferAttribute(normal, i);
+                    v.addScaledVector(vNormal, strength * falloff);
+                    pos.setXYZ(i, v.x, v.y, v.z);
+                }
+            }
+            pos.needsUpdate = true;
+            this.selected.geometry.computeVertexNormals();
+        }
+
+        // Основа для Extrude (E)
+        extrude() {
+            if (this.mode !== 'EDIT' || !this.selected) return;
+            console.log("Extruding selected " + this.editSubMode);
+            // В NonIndexed геометрии здесь создаются новые треугольники 
+            // и добавляются в BufferAttribute
+            this.selected.geometry.computeVertexNormals();
+        }
+
+        getRayHit(e) {
+            const rect = this.renderer.domElement.getBoundingClientRect();
+            const mouse = new THREE.Vector2(
+                ((e.clientX - rect.left) / rect.width) * 2 - 1,
+                -((e.clientY - rect.top) / rect.height) * 2 + 1
+            );
+            const ray = new THREE.Raycaster();
+            ray.setFromCamera(mouse, this.camera);
+            const intersects = ray.intersectObjects(this.objects, true);
+            return intersects.length > 0 ? intersects[0] : null;
+        }
+
+        // ... остальные методы (addObject, addLight, animate) как в твоем исходнике, 
+        // но с вызовом buildVertexHelpers при смене меша ...
+
+        animate() {
+            requestAnimationFrame(() => this.animate());
+            this.controls.update();
+            this.renderer.render(this.scene, this.camera);
+        }
+    }
+
+    window.app = new VProEngine();
+</script>
 </body>
 </html>
