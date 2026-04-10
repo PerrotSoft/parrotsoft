@@ -14,8 +14,6 @@
             --bg: #0b0c0f;
             --panel: #16181d;
             --accent: #ffa500;
-            --accent-3d: #00ff95;
-            --accent-glow: rgba(255, 165, 0, 0.4);
             --border: #2a2d34;
             --text: #c0c0c0;
         }
@@ -27,15 +25,16 @@
             display: flex; flex-direction: column;
         }
 
-        /* NAVBAR Оптимизация под рекламу */
+        /* NAVBAR - Верхняя панель */
         .navbar {
-            height: 70px; /* Чуть увеличили высоту для баннера */
+            height: 70px;
             background: #000;
             display: flex; align-items: center; justify-content: space-between;
             padding: 0 20px; border-bottom: 1px solid var(--border);
             z-index: 1000;
         }
 
+        /* Контейнер ВЕРХНЕЙ рекламы (оставляем всегда) */
         .ad-top-container {
             flex-grow: 1;
             display: flex; justify-content: center;
@@ -49,25 +48,25 @@
             background: var(--panel); border: 1px solid var(--border);
             color: var(--text); padding: 8px 15px; cursor: pointer;
             border-radius: 4px; font-weight: bold; text-transform: uppercase;
-            transition: 0.3s; font-size: 11px;
+            font-size: 11px;
         }
 
-        .nav-btn:hover { border-color: var(--accent); color: #fff; }
-
-        /* Рабочая область */
         .page-container { flex-grow: 1; display: flex; position: relative; }
-
         .page { display: none; width: 100%; height: 100%; }
         .page.active { display: block; }
-
         iframe { width: 100%; height: 100%; border: none; }
 
-        /* Рекламный блок внутри страницы (Desktop) */
+        /* БОКОВОЙ БАННЕР (который мешает) */
         .ad-sidebar {
             position: absolute; right: 10px; top: 10px;
             width: 300px; height: 250px;
             z-index: 100; background: rgba(0,0,0,0.5);
             border-radius: 8px; overflow: hidden;
+        }
+
+        /* КЛАСС ДЛЯ СКРЫТИЯ */
+        .hidden-ad {
+            display: none !important;
         }
 
         /* Превью панель */
@@ -92,34 +91,23 @@
         
         <div class="ad-top-container">
             <script type="text/javascript">
-                atOptions = {
-                    'key' : '461fc1b30ddf891492b673d9f9ce6b0b',
-                    'format' : 'iframe',
-                    'height' : 90,
-                    'width' : 728,
-                    'params' : {}
-                };
+                atOptions = { 'key' : '461fc1b30ddf891492b673d9f9ce6b0b', 'format' : 'iframe', 'height' : 90, 'width' : 728, 'params' : {} };
             </script>
             <script type="text/javascript" src="//www.highperformanceformat.com/461fc1b30ddf891492b673d9f9ce6b0b/invoke.js"></script>
         </div>
 
         <div class="nav-btns">
-            <button class="nav-btn" onclick="openPreview('audio')">Audio Editor</button>
-            <button class="nav-btn" onclick="openPreview('d')">3D Editor</button>
+            <button id="btn-back" class="nav-btn hidden-ad" onclick="goBack()">В меню</button>
+            <button class="nav-btn" onclick="openPreview('audio')">Audio</button>
+            <button class="nav-btn" onclick="openPreview('d')">3D</button>
         </div>
     </div>
 
     <div class="page-container">
         <div id="page-audio" class="page">
-            <div class="ad-sidebar">
+            <div id="banner-to-hide" class="ad-sidebar">
                 <script type="text/javascript">
-                    atOptions = {
-                        'key' : 'e12a683813d15c90e3c07907f05208ae',
-                        'format' : 'iframe',
-                        'height' : 250,
-                        'width' : 300,
-                        'params' : {}
-                    };
+                    atOptions = { 'key' : 'e12a683813d15c90e3c07907f05208ae', 'format' : 'iframe', 'height' : 250, 'width' : 300, 'params' : {} };
                 </script>
                 <script type="text/javascript" src="//www.highperformanceformat.com/e12a683813d15c90e3c07907f05208ae/invoke.js"></script>
             </div>
@@ -142,8 +130,8 @@
 
     <script>
         const docs = {
-            audio: { title: "Audio Editor v2.4", text: "Tone.js Engine, MIDI Export", img: "https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=500", file: "audio.html" },
-            d: { title: "3D Visualizer v1.0", text: "WebGL Rendering, Scene Edit", img: "https://images.unsplash.com/photo-1633167606207-d840b5070fc2?w=500", file: "3d.html" }
+            audio: { title: "Audio Editor", text: "Tone.js Engine", img: "https://images.unsplash.com/photo-1598488035139-bdbb2231ce04?w=500", file: "audio.html" },
+            d: { title: "3D Visualizer", text: "WebGL Rendering", img: "https://images.unsplash.com/photo-1633167606207-d840b5070fc2?w=500", file: "3d.html" }
         };
 
         let activeTarget = '';
@@ -162,17 +150,33 @@
             document.getElementById('overlay').classList.remove('active');
         }
 
+        // АКТИВАЦИЯ ПРИЛОЖЕНИЯ
         document.getElementById('launchBtn').onclick = function() {
             const data = docs[activeTarget];
             closePreview();
+            
+            // 1. Скрываем боковой баннер, который мешает
+            document.getElementById('banner-to-hide').classList.add('hidden-ad');
+            
+            // 2. Показываем кнопку "Назад"
+            document.getElementById('btn-back').classList.remove('hidden-ad');
+
+            // 3. Переключаем страницы
             document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-            const targetPage = document.getElementById('page-' + activeTarget);
-            targetPage.classList.add('active');
+            document.getElementById('page-' + activeTarget).classList.add('active');
 
             const frameId = activeTarget === 'audio' ? 'daw-frame' : 'three-frame';
             const frame = document.getElementById(frameId);
             if (frame.src.includes('about:blank')) frame.src = data.file;
         };
+
+        // ВОЗВРАТ В МЕНЮ
+        function goBack() {
+            // Возвращаем баннер обратно
+            document.getElementById('banner-to-hide').classList.remove('hidden-ad');
+            document.getElementById('btn-back').classList.add('hidden-ad');
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+        }
     </script>
 </body>
 </html>
