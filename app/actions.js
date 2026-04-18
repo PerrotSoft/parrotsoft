@@ -25,7 +25,7 @@ export async function getDocs(username) {
   const data = await getRawUserData(username);
   return data.docs || [];
 }
-async function getRawUserData(username) {
+export async function getRawUserData(username) {
   const rs = await client.execute({
     sql: "SELECT data FROM users WHERE username = ?",
     args: [String(username)]
@@ -642,4 +642,139 @@ export async function apiResolvePackage(pkg_name, os = "ParrotOS", arch = "x64")
     file_type: compatible.type,
     price: manifest.price
   };
+}
+
+export async function setupSystemDatabases(adminName) {
+  if (adminName !== 'testoviy_account_2.2') return { error: "DENIED" };
+
+  try {
+    await client.execute(`CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, data TEXT)`);
+    await client.execute(`
+      CREATE TABLE IF NOT EXISTS admin_controls (
+        username TEXT PRIMARY KEY,
+        strikes INTEGER DEFAULT 0,
+        is_banned BOOLEAN DEFAULT 0,
+        admin_notes TEXT
+      )
+    `);
+
+    await client.execute(`
+      CREATE TABLE IF NOT EXISTS wavytube_videos (
+        id TEXT PRIMARY KEY,
+        title TEXT,
+        author TEXT,
+        description TEXT,
+        category TEXT,
+        video_url TEXT,
+        thumbnail_url TEXT,
+        views INTEGER DEFAULT 0,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+      )
+    `);
+
+    return { success: true, message: "База данных ParrotOS и WavyTube зарегистрирована" };
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
+export async function syncUserData(username, type, payload) {
+  const data = await getRawUserData(username);
+  data[type] = payload; 
+  await client.execute({
+    sql: "INSERT OR REPLACE INTO users (username, data) VALUES (?, ?)",
+    args: [username, JSON.stringify(data)]
+  });
+  return { success: true };
+}
+
+export async function getVideos(category = 'all') {
+  const sql = category === 'all' 
+    ? "SELECT * FROM wavytube_videos ORDER BY timestamp DESC" 
+    : "SELECT * FROM wavytube_videos WHERE category = ? ORDER BY timestamp DESC";
+  const rs = await client.execute({ sql, args: category === 'all' ? [] : [category] });
+  return rs.rows;
+}
+
+export async function adminModifyUser(targetUser, action) {
+  if (action === 'ban') {
+    await client.execute({
+      sql: "INSERT OR REPLACE INTO admin_controls (username, is_banned) VALUES (?, 1)",
+      args: [targetUser]
+    });
+  } else if (action === 'strike') {
+    await client.execute({
+      sql: "INSERT INTO admin_controls (username, strikes) VALUES (?, 1) ON CONFLICT(username) DO UPDATE SET strikes = strikes + 1",
+      args: [targetUser]
+    });
+  }
+  return { success: true };
+}
+
+export async function generateFullBackup(adminName) {
+  if (adminName !== 'testoviy_account_2.2') throw new Error("Access Denied");
+
+  const users = await client.execute("SELECT * FROM users");
+  const videos = await client.execute("SELECT * FROM wavytube_videos");
+  const controls = await client.execute("SELECT * FROM admin_controls");
+
+  return JSON.stringify({
+    version: "2.2",
+    backup_date: new Date().toISOString(),
+    tables: {
+      users: users.rows,
+      wavytube_videos: videos.rows,
+      admin_controls: controls.rows
+    }
+  }, null, 2);
+}
+export async function findDbAndOwner(dbId) {
+  await ensureTables();
+  const rs = await client.execute("SELECT username, data FROM users");
+  for (let row of rs.rows) {
+    const userData = JSON.parse(row.data);
+    const db = (userData.docs || []).find(d => d.id === dbId && d.type === 'v_db');
+    if (db) return { owner: row.username, db, allDocs: userData.docs };
+  }
+  return null;
+}
+
+export async function pdb_create(username, dbName) {
+  const userData = await getRawUserData(username);
+  const dbId = 'pdb_' + Math.random().toString(36).substring(2, 10);
+  // Генерация длинного секретного ключа доступа
+  const secretKey = 'sk_' + Array.from(crypto.getRandomValues(new Uint8Array(32)))
+    .map(b => b.toString(16).padStart(2, '0')).join('');
+
+  const newDb = {
+    id: dbId,
+    name: dbName,
+    type: 'v_db',
+    secretKey: secretKey,
+    content: {}, 
+    maxSize: 2 * 1024 * 1024,
+    created: Date.now()
+  };
+
+  await syncDocs(username, [...(userData.docs || []), newDb]);
+  return newDb;
+}
+export async function checkSize(content, limit) {
+  const currentSize = JSON.stringify(content).length;
+  return currentSize <= limit;
+}
+export async function pdb_update(username, dbId, content, allDocs) {
+  const updated = allDocs.map(d => d.id === dbId ? { ...d, content } : d);
+  await syncDocs(username, updated);
+}
+export async function pdb_delete(username, dbId) {
+  const userData = await getRawUserData(username);
+  const updated = (userData.docs || []).filter(d => d.id !== dbId);
+  await syncDocs(username, updated);
+  return { ok: true };
+}
+
+export async function pdb_list(username) {
+  const data = await getRawUserData(username);
+  return (data.docs || []).filter(item => item.type === 'v_db');
 }
