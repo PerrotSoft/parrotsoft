@@ -557,53 +557,6 @@ export async function apiSearchPacks(query = "") {
   const rs = await client.execute({ sql, args: [`%${query}%`, `%${query}%`] });
   return rs.rows;
 }
-export async function GET(request, { params }) {
-    const { pkg } = params; 
-    const { searchParams } = new URL(request.url);
-    
-    const buildName = searchParams.get('build');
-    const targetOs = searchParams.get('os');  
-
-    try {
-        const rs = await client.execute({
-            sql: "SELECT * FROM market_items WHERE pkg_name = ?",
-            args: [pkg]
-        });
-
-        if (rs.rows.length === 0) {
-            return NextResponse.json({ error: "Package not found" }, { status: 404 });
-        }
-
-        const app = rs.rows[0];
-        const versions = JSON.parse(app.os_versions || '[]');
-
-        let selectedBuild = null;
-
-        if (buildName) {
-            selectedBuild = versions.find(v => v.name === buildName);
-        } else if (targetOs) {
-            selectedBuild = versions.find(v => v.os === targetOs);
-        }
-        if (!selectedBuild) {
-            selectedBuild = versions[0];
-        }
-
-        return NextResponse.json({
-            package: app.pkg_name,
-            display_name: app.display_name,
-            resolved_build: selectedBuild ? {
-                name: selectedBuild.name,
-                url: selectedBuild.link,
-                os: selectedBuild.os,
-                arch: selectedBuild.arch || 'x64'
-            } : null,
-            status: selectedBuild ? "success" : "no_builds_available"
-        });
-
-    } catch (error) {
-        return NextResponse.json({ error: error.message }, { status: 500 });
-    }
-}
 export async function apiGetManifest(pkg_name) {
   await initParrotDB();
   const rs = await client.execute({
@@ -695,54 +648,38 @@ export async function getVideos(category = 'all') {
   const rs = await client.execute({ sql, args: category === 'all' ? [] : [category] });
   return rs.rows;
 }
-
-export async function adminModifyUser(targetUser, action) {
-  if (action === 'ban') {
-    await client.execute({
-      sql: "INSERT OR REPLACE INTO admin_controls (username, is_banned) VALUES (?, 1)",
-      args: [targetUser]
-    });
-  } else if (action === 'strike') {
-    await client.execute({
-      sql: "INSERT INTO admin_controls (username, strikes) VALUES (?, 1) ON CONFLICT(username) DO UPDATE SET strikes = strikes + 1",
-      args: [targetUser]
-    });
-  }
-  return { success: true };
-}
-
-export async function generateFullBackup(adminName) {
-  if (adminName !== 'testoviy_account_2.2') throw new Error("Access Denied");
-
-  const users = await client.execute("SELECT * FROM users");
-  const videos = await client.execute("SELECT * FROM wavytube_videos");
-  const controls = await client.execute("SELECT * FROM admin_controls");
-
-  return JSON.stringify({
-    version: "2.2",
-    backup_date: new Date().toISOString(),
-    tables: {
-      users: users.rows,
-      wavytube_videos: videos.rows,
-      admin_controls: controls.rows
-    }
-  }, null, 2);
+export async function syncDb(username, dbData) {
+  'use server';
+  await ensureTables();
+  const userData = await getRawUserData(username);
+  
+  userData.db = dbData;
+  
+  await client.execute({
+    sql: "UPDATE users SET data = ? WHERE username = ?",
+    args: [JSON.stringify(userData), String(username)]
+  });
 }
 export async function findDbAndOwner(dbId) {
+  'use server';
   await ensureTables();
   const rs = await client.execute("SELECT username, data FROM users");
   for (let row of rs.rows) {
-    const userData = JSON.parse(row.data);
-    const db = (userData.docs || []).find(d => d.id === dbId && d.type === 'v_db');
-    if (db) return { owner: row.username, db, allDocs: userData.docs };
+    const userData = JSON.parse(row.data || "{}");
+    const dbList = userData.db || [];
+    
+    const db = dbList.find(d => d.id === dbId);
+    if (db) return { owner: row.username, db, allDbs: dbList };
   }
   return null;
 }
 
 export async function pdb_create(username, dbName) {
+  'use server';
+  await ensureTables();
   const userData = await getRawUserData(username);
+  
   const dbId = 'pdb_' + Math.random().toString(36).substring(2, 10);
-  // Генерация длинного секретного ключа доступа
   const secretKey = 'sk_' + Array.from(crypto.getRandomValues(new Uint8Array(32)))
     .map(b => b.toString(16).padStart(2, '0')).join('');
 
@@ -752,29 +689,230 @@ export async function pdb_create(username, dbName) {
     type: 'v_db',
     secretKey: secretKey,
     content: {}, 
-    maxSize: 2 * 1024 * 1024,
+    size: 0,
     created: Date.now()
   };
 
-  await syncDocs(username, [...(userData.docs || []), newDb]);
+  if (!userData.db || !Array.isArray(userData.db)) {
+    userData.db = [];
+  }
+  userData.db.push(newDb);
+  await syncDb(username, userData.db);
+  
   return newDb;
-}
-export async function checkSize(content, limit) {
-  const currentSize = JSON.stringify(content).length;
-  return currentSize <= limit;
-}
-export async function pdb_update(username, dbId, content, allDocs) {
-  const updated = allDocs.map(d => d.id === dbId ? { ...d, content } : d);
-  await syncDocs(username, updated);
-}
-export async function pdb_delete(username, dbId) {
-  const userData = await getRawUserData(username);
-  const updated = (userData.docs || []).filter(d => d.id !== dbId);
-  await syncDocs(username, updated);
-  return { ok: true };
 }
 
 export async function pdb_list(username) {
-  const data = await getRawUserData(username);
-  return (data.docs || []).filter(item => item.type === 'v_db');
+  'use server';
+  const userData = await getRawUserData(username);
+  const separateDbs = userData.db || [];
+  let driveDbs = [];
+  if (userData.drive && userData.drive.files) {
+    driveDbs = userData.drive.files.filter(f => f.type === 'v_db');
+  } else if (Array.isArray(userData.drive)) {
+    driveDbs = userData.drive.filter(f => f.type === 'v_db');
+  }
+  const combined = [...separateDbs, ...driveDbs];
+  const uniqueDbs = Array.from(new Map(combined.map(item => [item.id, item])).values());
+  
+  return uniqueDbs;
+}
+
+export async function pdb_update(username, dbId, content) {
+  'use server';
+  const userData = await getRawUserData(username);
+  const currentDbs = userData.db || [];
+  
+  const updatedDbs = currentDbs.map(db => {
+    if (db.id === dbId) {
+      return { ...db, content: content, lastModified: Date.now() };
+    }
+    return db;
+  });
+
+  await syncDb(username, updatedDbs);
+  return { success: true };
+}
+
+export async function pdb_delete(username, dbId) {
+  'use server';
+  const userData = await getRawUserData(username);
+  const updatedDbs = (userData.db || []).filter(db => db.id !== dbId);
+  
+  await syncDb(username, updatedDbs);
+  return { ok: true };
+}
+export async function admin_getDashboardData() {
+  try {
+    const userRs = await client.execute("SELECT username, data FROM users");
+    const users = userRs.rows.map(row => {
+      const data = JSON.parse(row.data || "{}");
+      return {
+        username: row.username,
+        balance: data.balance || 0,
+        isBlocked: data.isBlocked || false,
+        email: data.email || "no-email@example.com",
+        dbCount: (data.docs || []).length,
+        rawDocs: data.docs || []
+      };
+    });
+
+    const transRs = await client.execute("SELECT * FROM transactions ORDER BY timestamp DESC LIMIT 100");
+    const transactions = transRs.rows;
+
+    const totalCoins = users.reduce((sum, u) => sum + u.balance, 0);
+    const totalPaid = transactions
+        .filter(t => t.status === 'completed' || t.status === 'success')
+        .reduce((sum, t) => sum + Number(t.amount), 0);
+
+    return { success: true, users, transactions, stats: { totalCoins, totalPaid, totalUsers: users.length } };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+export async function admin_toggleUserBlock(username, blockStatus) {
+  const userData = await getRawUserData(username);
+  userData.isBlocked = blockStatus;
+  
+  await client.execute({
+    sql: "UPDATE users SET data = ? WHERE username = ?",
+    args: [JSON.stringify(userData), username]
+  });
+  return { success: true, isBlocked: blockStatus };
+}
+
+export async function admin_updateBalance(username, amount) {
+  const userData = await getRawUserData(username);
+  userData.balance = (Number(userData.balance) || 0) + Number(amount);
+  
+  await client.execute({
+    sql: "UPDATE users SET data = ? WHERE username = ?",
+    args: [JSON.stringify(userData), username]
+  });
+  return { success: true, newBalance: userData.balance };
+}
+
+export async function admin_resetUserAccount(targetUsername) {
+  return await syncDocs(targetUsername, []);
+}
+
+export async function admin_getUserFullContext(targetUsername) {
+  const row = await client.execute({
+    sql: "SELECT data FROM users WHERE username = ?",
+    args: [targetUsername]
+  });
+  
+  if (row.rows.length === 0) return { error: "User not found" };
+  const userData = JSON.parse(row.rows[0].data || "{}");
+  
+  return { 
+    username: targetUsername,
+    balance: userData.balance || 0,
+    docs: userData.docs || [],
+    email: userData.email || "no-email@example.com",
+    isBlocked: userData.isBlocked || false
+  };
+}
+
+export async function admin_deleteUserDoc(targetUsername, docId) {
+  const userData = await getRawUserData(targetUsername);
+  const filteredDocs = (userData.docs || []).filter(d => d.id !== docId);
+  return await syncDocs(targetUsername, filteredDocs);
+}
+
+export async function admin_deleteUserFile(targetUsername, dbId, fileKey) {
+  const userData = await getRawUserData(targetUsername);
+  userData.docs = userData.docs.map(doc => {
+    if (doc.id === dbId && doc.content) {
+      const newContent = { ...doc.content };
+      delete newContent[fileKey];
+      return { ...doc, content: newContent };
+    }
+    return doc;
+  });
+  return await syncDocs(targetUsername, userData.docs);
+}
+
+export async function admin_masqueradeAsUser(targetUsername) {
+  console.log(`🛡️ ADMIN LOGS IN UNDER THE NAME: ${targetUsername}`);
+  return { success: true, target: targetUsername };
+}
+export async function admin_exportFullBackup() {
+  try {
+    const usersRs = await client.execute("SELECT * FROM users");
+    const transRs = await client.execute("SELECT * FROM transactions");
+    
+    const backupData = {
+      timestamp: Date.now(),
+      tables: {
+        users: usersRs.rows,
+        transactions: transRs.rows
+      }
+    };
+    return { success: true, payload: JSON.stringify(backupData, null, 2) };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+export async function admin_importFullBackup(jsonString) {
+  try {
+    const data = JSON.parse(jsonString);
+    if (!data.tables) throw new Error("Неверный формат .gsm файла");
+
+    await client.execute("DELETE FROM users");
+    for (const row of data.tables.users) {
+      await client.execute({
+        sql: "INSERT INTO users (username, data) VALUES (?, ?)",
+        args: [row.username, row.data]
+      });
+    }
+
+    await client.execute("DELETE FROM transactions");
+    for (const row of data.tables.transactions) {
+      await client.execute({
+        sql: "INSERT INTO transactions (id, user, amount, status, timestamp) VALUES (?, ?, ?, ?, ?)",
+        args: [row.id, row.user, row.amount, row.status, row.timestamp]
+      });
+    }
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+export async function adminModifyUser(username, newData) {
+  'use server';
+  try {
+    const userData = await getRawUserData(username);
+    const updatedData = { ...userData, ...newData };
+    
+    await client.execute({
+      sql: "INSERT INTO users (username, data) VALUES (?, ?) ON CONFLICT(username) DO UPDATE SET data = excluded.data",
+      args: [String(username), JSON.stringify(updatedData)]
+    });
+    
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+export async function generateFullBackup() {
+  'use server';
+  try {
+    const usersRs = await client.execute("SELECT * FROM users");
+    const transRs = await client.execute("SELECT * FROM transactions");
+    
+    const backupData = {
+      timestamp: Date.now(),
+      tables: {
+        users: usersRs.rows,
+        transactions: transRs.rows
+      }
+    };
+    return { success: true, payload: JSON.stringify(backupData, null, 2) };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
 }

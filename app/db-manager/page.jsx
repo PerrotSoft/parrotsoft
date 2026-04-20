@@ -1,24 +1,23 @@
 'use client';
 import { useState, useEffect, useRef } from 'react';
 
-// Функция для подсветки синтаксиса JSON
 const highlightJSON = (jsonString) => {
     if (!jsonString) return "";
     let html = jsonString.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const regex = /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?)/g;
     
     html = html.replace(regex, (match) => {
-        let color = '#ffb86c'; // Числа (Оранжевый)
+        let color = '#ffb86c';  
         if (/^"/.test(match)) {
             if (/:$/.test(match)) {
-                color = '#ff79c6'; // Ключи (Розовый)
+                color = '#ff79c6';  
             } else {
-                color = '#f1fa8c'; // Строки (Желтый)
+                color = '#f1fa8c';  
             }
         } else if (/true|false/.test(match)) {
-            color = '#8be9fd'; // Boolean (Голубой)
+            color = '#8be9fd';  
         } else if (/null/.test(match)) {
-            color = '#bd93f9'; // Null (Фиолетовый)
+            color = '#bd93f9';  
         }
         return `<span style="color: ${color}">${match}</span>`;
     });
@@ -33,17 +32,16 @@ export default function DBManager() {
     const [selectedDb, setSelectedDb] = useState(null);
     const [activeTab, setActiveTab] = useState('info');
     
-    // Состояние для GUI-редактирования элементов
-    const [guiEdit, setGuiEdit] = useState(null); // { key: string, type: 'edit' | 'rename', val: string }
+    const [guiEdit, setGuiEdit] = useState(null);
     const [newGuiKey, setNewGuiKey] = useState('');
     const [newGuiVal, setNewGuiVal] = useState('');
 
     const preRef = useRef(null);
 
-    const auth = { user: 'testoviy_account_2.2', pass: '1234' };
+    const auth = { user: localStorage.getItem('p_user'), pass: '1234' };
 
     const load = async () => {
-        const r = await fetch(`/api/pc?user=${auth.user}&pass=${auth.pass}&cmd=disk_ls`);
+        const r = await fetch(`/api/pc?user=${auth.user}&pass=${auth.pass}&cmd=db_ls`);
         if (r.ok) {
             const data = await r.json();
             const filteredDbs = data.filter(d => d.type === 'v_db');
@@ -60,7 +58,7 @@ export default function DBManager() {
     useEffect(() => { load(); }, []);
 
     const handleCreate = async () => {
-        const name = prompt("Название новой базы данных:");
+        const name = prompt("Enter the name of the new database:");
         if (!name) return;
         await fetch(`/api/pc?user=${auth.user}&pass=${auth.pass}&cmd=db_create&args=${name}`);
         load();
@@ -69,9 +67,8 @@ export default function DBManager() {
     const handleSave = async (dbId, secretKey) => {
         try {
             const dataToSave = editingData[dbId];
-            JSON.parse(dataToSave); // Проверка валидности JSON
+            JSON.parse(dataToSave);
             
-            // ИСПОЛЬЗУЕМ POST, КАК ТРЕБУЕТ ТВОЙ ROUTE.JS (Устраняет ошибку 400/405 Bad Request)
             const r = await fetch(`/api/db/${dbId}/${secretKey}/write_all`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -79,27 +76,26 @@ export default function DBManager() {
             });
 
             if (r.ok) {
-                alert("✅ Данные ParrotDB успешно сохранены!");
+                alert("✅ Data saved successfully!");
                 load();
             } else {
                 const err = await r.json();
-                alert("❌ Ошибка при сохранении: " + (err.error || "Неизвестная ошибка"));
+                alert("❌ Error saving data: " + (err.error || "Unknown error"));
             }
         } catch (e) {
-            alert("⚠️ Ошибка: Неверный формат JSON. Проверьте синтаксис.");
+            alert("⚠️ Error: Invalid JSON format. Check the syntax.");
         }
     };
 
     const handleDelete = async (dbId) => {
-        if (!confirm("Вы уверены, что хотите полностью удалить эту базу?")) return;
+        if (!confirm("Are you sure you want to completely delete this database?")) return;
         await fetch(`/api/pc?user=${auth.user}&pass=${auth.pass}&cmd=db_delete_db&args=${dbId}`);
         if (selectedDb?.id === dbId) setSelectedDb(null);
         load();
     };
 
-    // --- ФУНКЦИИ GUI РЕДАКТОРА ---
     const handleAddGuiItem = () => {
-        if (!newGuiKey) return alert("Введите ключ!");
+        if (!newGuiKey) return alert("Enter the key!");
         try {
             const currentObj = JSON.parse(editingData[selectedDb.id] || "{}");
             let parsedVal = newGuiVal;
@@ -109,7 +105,7 @@ export default function DBManager() {
             setEditingData({ ...editingData, [selectedDb.id]: JSON.stringify(currentObj, null, 4) });
             setNewGuiKey('');
             setNewGuiVal('');
-        } catch (e) { alert("Ошибка JSON"); }
+        } catch (e) { alert("JSON error"); }
     };
 
     const handleSaveGuiAction = () => {
@@ -129,11 +125,11 @@ export default function DBManager() {
             
             setEditingData({ ...editingData, [selectedDb.id]: JSON.stringify(currentObj, null, 4) });
             setGuiEdit(null);
-        } catch (e) { alert("Ошибка структуры данных"); }
+        } catch (e) { alert("Data structure error"); }
     };
 
     const handleDeleteGuiItem = (keyToRemove) => {
-        if(!confirm(`Удалить ключ "${keyToRemove}"?`)) return;
+        if(!confirm(`Delete key "${keyToRemove}"?`)) return;
         try {
             const currentObj = JSON.parse(editingData[selectedDb.id] || "{}");
             delete currentObj[keyToRemove];
@@ -141,7 +137,6 @@ export default function DBManager() {
         } catch (e) {}
     };
 
-    // Синхронизация прокрутки между Textarea и подсветкой
     const handleScroll = (e) => {
         if (preRef.current) {
             preRef.current.scrollTop = e.target.scrollTop;
@@ -163,10 +158,10 @@ export default function DBManager() {
         return (
             <div style={styles.container}>
                 <header style={styles.header}>
-                    <h1 style={{ margin: 0, fontSize: '24px' }}>🦜 PARROT CLOUD IDE <span style={{color: '#888', fontSize: '14px'}}>v4.0</span></h1>
+                    <h1 style={{ margin: 0, fontSize: '24px' }}>🦜 PARROT CLOUD IDE <span style={{color: '#888', fontSize: '14px'}}>v2.0</span></h1>
                     <div style={{ display: 'flex', gap: '15px' }}>
                         <input 
-                            placeholder="🔍 Поиск баз данных..." 
+                            placeholder="🔍 Search databases..." 
                             value={searchQuery} 
                             onChange={e => setSearchQuery(e.target.value)}
                             style={styles.input}
@@ -182,7 +177,7 @@ export default function DBManager() {
                                 <h3 style={{ margin: 0 }}>{db.name}</h3>
                                 <span style={styles.badge}>{db.id}</span>
                             </div>
-                            <p style={{ color: '#888', fontSize: '12px', margin: '10px 0 0 0' }}>Нажмите, чтобы открыть управление</p>
+                            <p style={{ color: '#888', fontSize: '12px', margin: '10px 0 0 0' }}>Click to open management</p>
                         </div>
                     ))}
                 </div>
@@ -194,20 +189,20 @@ export default function DBManager() {
         <div style={styles.container}>
             <header style={styles.header}>
                 <div>
-                    <button onClick={() => setSelectedDb(null)} style={styles.btnSecondary}>← НАЗАД К СПИСКУ</button>
+                    <button onClick={() => setSelectedDb(null)} style={styles.btnSecondary}>← BACK TO LIST</button>
                     <h1 style={{ display: 'inline-block', margin: '0 0 0 20px', fontSize: '20px' }}>
                         {selectedDb.name} <span style={{color: '#00ff41', fontSize: '14px'}}>[{selectedDb.id}]</span>
                     </h1>
                 </div>
                 <div>
-                    <button onClick={() => handleSave(selectedDb.id, selectedDb.secretKey)} style={styles.btnPrimary}>💾 СОХРАНИТЬ В ОБЛАКО</button>
+                    <button onClick={() => handleSave(selectedDb.id, selectedDb.secretKey)} style={styles.btnPrimary}>💾 SAVE TO CLOUD</button>
                 </div>
             </header>
 
             <div style={styles.tabs}>
-                <button style={activeTab === 'info' ? styles.tabActive : styles.tab} onClick={() => setActiveTab('info')}>ℹ️ ИНФО & API</button>
+                <button style={activeTab === 'info' ? styles.tabActive : styles.tab} onClick={() => setActiveTab('info')}>ℹ️ INFO & API</button>
                 <button style={activeTab === 'json' ? styles.tabActive : styles.tab} onClick={() => setActiveTab('json')}>{} RAW JSON</button>
-                <button style={activeTab === 'gui' ? styles.tabActive : styles.tab} onClick={() => setActiveTab('gui')}>🗂️ GUI ИНТЕРФЕЙС</button>
+                <button style={activeTab === 'gui' ? styles.tabActive : styles.tab} onClick={() => setActiveTab('gui')}>🗂️ GUI INTERFACE</button>
             </div>
 
             <div style={styles.contentArea}>
@@ -215,30 +210,30 @@ export default function DBManager() {
                     <div style={{ animation: 'fadeIn 0.3s' }}>
                         <div style={styles.card}>
                             <h3 style={{ color: '#00ff41', borderBottom: '1px solid #333', paddingBottom: '10px', marginTop: 0 }}>
-                                📊 СОСТОЯНИЕ ХРАНИЛИЩА
+                                📊 STORAGE STATUS
                             </h3>
                             
                             {(() => {
                                 const currentSize = JSON.stringify(currentParsedData).length;
-                                const maxSize = selectedDb.maxSize || 2097152; // 2MB по умолчанию
+                                const maxSize = selectedDb.maxSize || 2097152;
                                 const percent = Math.min((currentSize / maxSize) * 100, 100).toFixed(1);
                                 
                                 return (
                                     <>
                                         <div style={styles.statsGrid}>
                                             <div style={styles.statBox}>
-                                                <div style={{ color: '#888', fontSize: '12px' }}>ИСПОЛЬЗОВАНО</div>
+                                                <div style={{ color: '#888', fontSize: '12px' }}>USED</div>
                                                 <div style={{ fontSize: '18px', fontWeight: 'bold' }}>{(currentSize / 1024).toFixed(2)} KB</div>
                                             </div>
                                             <div style={styles.statBox}>
-                                                <div style={{ color: '#888', fontSize: '12px' }}>ЛИМИТ БАЗЫ</div>
+                                                <div style={{ color: '#888', fontSize: '12px' }}>LIMIT</div>
                                                 <div style={{ fontSize: '18px', fontWeight: 'bold' }}>{(maxSize / (1024 * 1024)).toFixed(0)} MB</div>
                                             </div>
                                         </div>
 
                                         <div style={{ marginTop: '20px' }}>
                                             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '5px' }}>
-                                                <span>Заполнение диска</span>
+                                                <span>Disk Fill</span>
                                                 <span>{percent}%</span>
                                             </div>
                                             <div style={styles.progressBg}>
@@ -252,11 +247,11 @@ export default function DBManager() {
 
                                         <button 
                                             style={styles.btnUpgrade}
-                                            onClick={() => alert("Заглушка: Запрос на расширение до " + ((maxSize / (1024*1024)) + 1) + " MB отправлен.")}
+                                            onClick={() => alert("Placeholder: Request to expand to " + ((maxSize / (1024*1024)) + 1) + " MB sent.")}
                                             onMouseOver={(e) => e.target.style.background = 'rgba(0, 255, 65, 0.1)'}
                                             onMouseOut={(e) => e.target.style.background = 'transparent'}
                                         >
-                                            ⚡ УВЕЛИЧИТЬ РАЗМЕР (+1 MB)
+                                            ⚡ INCREASE SIZE (+1 MB)
                                         </button>
                                     </>
                                 );
@@ -265,10 +260,10 @@ export default function DBManager() {
 
                         <div style={{ ...styles.card, marginTop: '20px' }}>
                             <h3 style={{ color: '#00ff41', borderBottom: '1px solid #333', paddingBottom: '10px', marginTop: 0 }}>
-                                🔑 КЛЮЧИ ДОСТУПА
+                                🔑 ACCESS KEYS
                             </h3>
                             <p style={{ fontSize: '14px' }}><strong>ID:</strong> <span style={styles.badge}>{selectedDb.id}</span></p>
-                            <p><strong>Секретный ключ (Secret):</strong> <br/>
+                            <p><strong>Secret key (Secret):</strong> <br/>
                                 <span style={{ ...styles.codeBlock, fontSize: '12px', wordBreak: 'break-all' }}>{selectedDb.secretKey}</span>
                             </p>
                             <p><strong>API Endpoint:</strong> <br/>
@@ -280,13 +275,11 @@ export default function DBManager() {
                 {activeTab === 'json' && (
                     <div style={{ animation: 'fadeIn 0.3s', height: '100%' }}>
                         <div style={styles.editorWrapper}>
-                            {/* Слой с подсветкой синтаксиса */}
                             <pre 
                                 ref={preRef}
                                 style={styles.syntaxLayer}
                                 dangerouslySetInnerHTML={{ __html: highlightJSON(editingData[selectedDb.id] || "{}") }}
                             />
-                            {/* Прозрачный Textarea для ввода */}
                             <textarea
                                 value={editingData[selectedDb.id] || "{}"}
                                 onChange={(e) => setEditingData({...editingData, [selectedDb.id]: e.target.value})}
@@ -300,28 +293,26 @@ export default function DBManager() {
                 {activeTab === 'gui' && (
                     <div style={{ animation: 'fadeIn 0.3s', display: 'flex', flexDirection: 'column', gap: '20px' }}>
                         
-                        {/* Панель добавления нового ключа */}
                         <div style={{ ...styles.card, display: 'flex', gap: '10px', alignItems: 'center', border: '1px solid #333' }}>
                             <input 
-                                placeholder="Новый ключ" 
+                                placeholder="New key" 
                                 value={newGuiKey} 
                                 onChange={e => setNewGuiKey(e.target.value)} 
                                 style={{ ...styles.input, flex: 1, height: '38px' }} 
                             />
                             <input 
-                                placeholder="Значение" 
+                                placeholder="Value" 
                                 value={newGuiVal} 
                                 onChange={e => setNewGuiVal(e.target.value)} 
                                 style={{ ...styles.input, flex: 2, height: '38px' }} 
                             />
-                            <button onClick={handleAddGuiItem} style={{ ...styles.btnPrimary, height: '38px', padding: '0 20px' }}>ДОБАВИТЬ</button>
+                            <button onClick={handleAddGuiItem} style={{ ...styles.btnPrimary, height: '38px', padding: '0 20px' }}>ADD</button>
                         </div>
 
-                        {/* Список элементов с ограничителем высоты всей области */}
                         <div style={{ 
                             display: 'grid', 
                             gap: '12px', 
-                            maxHeight: 'calc(100vh - 320px)', // Ограничитель, чтобы не вылезало за окно браузера
+                            maxHeight: 'calc(100vh - 320px)', 
                             overflowY: 'auto',
                             paddingRight: '5px' 
                         }}>
@@ -334,10 +325,9 @@ export default function DBManager() {
                                 }}>
                                     
                                     {guiEdit?.key === key ? (
-                                        /* РЕЖИМ РЕДАКТИРОВАНИЯ / ПЕРЕИМЕНОВАНИЯ (Небольшой редактор) */
                                         <div style={{ flex: 1, display: 'flex', gap: '10px', flexDirection: 'column', animation: 'fadeIn 0.2s' }}>
                                             <div style={{ color: '#00ff41', fontSize: '11px', fontWeight: 'bold', textTransform: 'uppercase' }}>
-                                                {guiEdit.type === 'edit' ? `Изменение содержимого: ${key}` : `Новое имя для: ${key}`}
+                                                {guiEdit.type === 'edit' ? `Changing content: ${key}` : `New name for: ${key}`}
                                             </div>
                                             
                                             {guiEdit.type === 'edit' ? (
@@ -356,7 +346,7 @@ export default function DBManager() {
                                                         fontSize: '13px',
                                                         outline: 'none'
                                                     }}
-                                                    placeholder="Введите значение (JSON или текст)..."
+                                                    placeholder="Enter value (JSON or text)..."
                                                 />
                                             ) : (
                                                 <input 
@@ -367,18 +357,17 @@ export default function DBManager() {
                                             )}
                                             
                                             <div style={{ display: 'flex', gap: '8px' }}>
-                                                <button onClick={handleSaveGuiAction} style={{ ...styles.btnPrimary, padding: '6px 15px', fontSize: '12px' }}>Применить</button>
-                                                <button onClick={() => setGuiEdit(null)} style={{ ...styles.btnSecondary, padding: '6px 15px', fontSize: '12px' }}>Отмена</button>
+                                                <button onClick={handleSaveGuiAction} style={{ ...styles.btnPrimary, padding: '6px 15px', fontSize: '12px' }}>Apply</button>
+                                                <button onClick={() => setGuiEdit(null)} style={{ ...styles.btnSecondary, padding: '6px 15px', fontSize: '12px' }}>Cancel</button>
                                             </div>
                                         </div>
                                     ) : (
-                                        /* СТАНДАРТНОЕ ОТОБРАЖЕНИЕ (С точками ...) */
                                         <>
                                             <div style={{ flex: 1, overflow: 'hidden', paddingRight: '15px' }}>
                                                 <div style={{ color: '#666', fontSize: '11px', marginBottom: '2px', fontWeight: 'bold' }}>{key}</div>
                                                     <div style={{ 
                                                         flex: 1, 
-                                                        minWidth: 0, // КРИТИЧНО: позволяет контейнеру сжиматься меньше размера текста
+                                                        minWidth: 0,
                                                         paddingRight: '20px' 
                                                     }}>
                                                         <div style={{ color: '#888', fontSize: '12px', marginBottom: '4px' }}>
@@ -401,19 +390,19 @@ export default function DBManager() {
                                                     onClick={() => setGuiEdit({key, type: 'edit', val: JSON.stringify(currentParsedData[key], null, 2)})} 
                                                     style={{ ...styles.actionBtn, background: '#111' }}
                                                 >
-                                                    Изменить
+                                                    Change Value
                                                 </button>
                                                 <button 
                                                     onClick={() => setGuiEdit({key, type: 'rename', val: key})} 
                                                     style={{ ...styles.actionBtn, background: '#111' }}
                                                 >
-                                                    Имя
+                                                    Change Name
                                                 </button>
                                                 <button 
                                                     onClick={() => handleDeleteGuiItem(key)} 
                                                     style={{ ...styles.actionBtn, color: '#ff4444', borderColor: '#442222' }}
                                                 >
-                                                    Удалить
+                                                    Delete
                                                 </button>
                                             </div>
                                         </>
@@ -422,7 +411,6 @@ export default function DBManager() {
                             ))}
                         </div>
                         
-                        {/* Небольшой отступ снизу, чтобы не прилипало к краю */}
                         <div style={{ height: '20px' }}></div>
                     </div>
                 )}
@@ -431,7 +419,6 @@ export default function DBManager() {
     );
 }
 
-// Общие параметры для синхронизации слоев кода
 const codeStyles = {
     fontFamily: "'Fira Code', Consolas, monospace",
     fontSize: '14px',
@@ -448,7 +435,6 @@ const codeStyles = {
 };
 
 const styles = {
-    // Добавлен paddingTop: '80px', чтобы не было перекрытия с твоей шапкой сверху
     container: { padding: '30px', paddingTop: '80px', background: '#050505', color: '#e0e0e0', minHeight: '100vh', fontFamily: "'Segoe UI', sans-serif" },
     header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #222', paddingBottom: '20px', marginBottom: '20px' },
     input: { padding: '10px 15px', background: '#111', color: '#fff', border: '1px solid #333', borderRadius: '6px', outline: 'none' },
@@ -466,7 +452,6 @@ const styles = {
     codeBlock: { display: 'block', background: '#000', padding: '10px', borderRadius: '6px', border: '1px solid #222', color: '#00ff41', fontFamily: 'monospace' },
     guiItem: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#111', padding: '15px', borderLeft: '3px solid #00ff41', borderRadius: '6px' },
     
-    // Стили для редактора кода (Overlay подход)
     editorWrapper: { position: 'relative', width: '100%', height: '450px', background: '#050505', border: '1px solid #333', borderRadius: '6px', overflow: 'hidden' },
     syntaxLayer: { ...codeStyles, position: 'absolute', top: 0, left: 0, pointerEvents: 'none', zIndex: 1, overflow: 'hidden' },
     textareaLayer: { ...codeStyles, position: 'absolute', top: 0, left: 0, color: 'transparent', caretColor: '#00ff41', background: 'transparent', zIndex: 2, resize: 'none', overflow: 'auto' },
@@ -487,22 +472,19 @@ const styles = {
         fontWeight: 'bold',
         transition: '0.2s'
     },
-    // Найти и заменить в объекте styles:
     contentArea: { 
         background: '#0a0a0a', 
         border: '1px solid #222', 
         borderRadius: '10px', 
         padding: '20px', 
-        // НОВОЕ: ограничиваем высоту (минус шапка и табы) и добавляем прокрутку
         height: 'calc(100vh - 250px)', 
         overflowY: 'auto',
         position: 'relative'
     },
 
-    // Добавить новый стиль для GUI элементов:
     valueContainer: { 
-        maxHeight: '100px', // Высота одного элемента (текста) в списке
-        overflowY: 'auto',   // Скролл если текст внутри элемента слишком длинный
+        maxHeight: '100px',
+        overflowY: 'auto',  
         wordBreak: 'break-all',
         fontSize: '14px',
         color: '#ccc',
@@ -510,26 +492,23 @@ const styles = {
         background: '#050505',
         borderRadius: '4px'
     },
-    // В объекте styles найти:
     editorWrapper: { 
         position: 'relative', 
         width: '100%', 
-        height: '100%', // Теперь он будет занимать всю высоту contentArea
+        height: '100%', 
         background: '#050505', 
         border: '1px solid #333', 
         borderRadius: '6px', 
         overflow: 'hidden' 
     },
-    // Внутри объекта styles:
     truncate: {
-        whiteSpace: 'nowrap',      // Запрещаем перенос строки
-        overflow: 'hidden',        // Прячем всё, что не влезло
-        textOverflow: 'ellipsis',  // Добавляем те самые три точки (...)
-        maxWidth: '100%',          // Ограничиваем по ширине родителя
+        whiteSpace: 'nowrap',   
+        overflow: 'hidden',     
+        textOverflow: 'ellipsis', 
+        maxWidth: '100%',        
     },
-    // Для элементов GUI, чтобы они не раздувались
     valueContainer: {
-        maxWidth: '300px',         // Можешь настроить любую ширину
+        maxWidth: '300px',        
         overflow: 'hidden',
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
@@ -545,9 +524,9 @@ const styles = {
         border: '1px solid #222', 
         borderRadius: '10px', 
         padding: '20px', 
-        height: 'calc(100vh - 280px)', // Фиксируем высоту относительно окна браузера
-        overflowY: 'auto',            // Включаем внутреннюю прокрутку
-        display: 'flex',              // Помогает внутренним элементам правильно считать ширину
+        height: 'calc(100vh - 280px)',
+        overflowY: 'auto',           
+        display: 'flex',             
         flexDirection: 'column'
     },
 };

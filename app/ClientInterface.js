@@ -128,7 +128,8 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
                         { id: '5', name: 'WavyChat', icon: '💬', url: '/WavyChat' },
                         { id: '6', name: 'Web-PStudio', icon: '💻', url: '/web_pstudio.html' },
                         { id: '7', name: 'ParrotOS Installer', icon: '💻', url: '/installer' },
-                        { id: '8', name: 'ParrotOS Pley', icon: '💻', url: '/parrotplay' }
+                        { id: '8', name: 'ParrotOS Pley', icon: '💻', url: '/parrotplay' },
+                        { id: '9', name: 'ParrotOS DB Manager', icon: '📂', url: '/db-manager' }
                     ],
                 avatar: ""
             };
@@ -431,48 +432,50 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
                                     style={{ flex: 1, marginBottom: 0 }} 
                                 />
                                 <button className="btn-v4" style={{ width: 'auto', padding: '0 20px' }} onClick={async () => {
-    const amountInput = document.getElementById('add_amount');
-    const amount = amountInput.value;
-    
-    console.log(`[CLIENT] Нажата кнопка оплаты. Сумма: ${amount}`);
-    if (!amount || amount <= 0) return alert("Введите сумму!");
+                                    const amountInput = document.getElementById('add_amount');
+                                    const amount = amountInput.value;
+                                    
+                                    console.log(`[CLIENT] Payment button clicked. Amount: ${amount}`);
+                                    if (!amount || amount <= 0) return alert("Please enter a valid amount!");
 
-    console.log("[CLIENT] Отправка запроса на сервер для создания сессии...");
-    console.log(user.username, amount);
-    const orderID = await dbActions.createPaySession(user.username, amount);
-    console.log("[CLIENT] Ответ от сервера получен. OrderID:", orderID);
-    if (orderID) {
-        console.log(`[CLIENT] Сессия получена. ID заказа: ${orderID}`);
-        const payUrl = `https://www.sandbox.paypal.com/checkoutnow?token=${orderID}`;
-        
-        console.log("[CLIENT] Открытие окна PayPal...");
-        const payWin = window.open(payUrl, 'PayPal', 'width=450,height=600');
+                                    console.log("[CLIENT] Sending request to server to create a session...");
+                                    console.log(user.username, amount);
+                                    
+                                    const orderID = await dbActions.createPaySession(user.username, amount);
+                                    console.log("[CLIENT] Server response received. OrderID:", orderID);
+                                    
+                                    if (orderID) {
+                                        console.log(`[CLIENT] Session received. Order ID: ${orderID}`);
+                                        const payUrl = `https://www.sandbox.paypal.com/checkoutnow?token=${orderID}`;
+                                        
+                                        console.log("[CLIENT] Opening PayPal window...");
+                                        const payWin = window.open(payUrl, 'PayPal', 'width=450,height=600');
 
-        const timer = setInterval(async () => {
-            if (payWin.closed) {
-                console.log("[CLIENT] Окно PayPal закрыто пользователем. Начинаем проверку...");
-                clearInterval(timer);
-                
-                const res = await dbActions.finalizeAndAddBalance(orderID, user.username);
-                console.log("[CLIENT] Результат проверки с сервера:", res);
-                
-                if (res.success) {
-                    setBalance(res.newBalance);
-                    amountInput.value = '';
-                    alert(`Баланс пополнен! Новый баланс: ${res.newBalance} pc`);
-                } else {
-                    console.warn("[CLIENT] Сервер не подтвердил оплату.");
-                    alert("Сервер не нашел подтверждения оплаты от PayPal.");
-                }
-            }
-        }, 1000);
-    } else {
-        console.error("[CLIENT] Сервер не вернул orderID. Проверьте логи терминала.");
-        alert("Ошибка при создании сессии оплаты.");
-    }
-}}>
-    add Pey Coins
-</button>
+                                        const timer = setInterval(async () => {
+                                            if (payWin.closed) {
+                                                console.log("[CLIENT] PayPal window closed by user. Starting verification...");
+                                                clearInterval(timer);
+                                                
+                                                const res = await dbActions.finalizeAndAddBalance(orderID, user.username);
+                                                console.log("[CLIENT] Verification result from server:", res);
+                                                
+                                                if (res.success) {
+                                                    setBalance(res.newBalance);
+                                                    amountInput.value = '';
+                                                    alert(`Balance updated! New balance: ${res.newBalance} pc`);
+                                                } else {
+                                                    console.warn("[CLIENT] Server failed to verify payment.");
+                                                    alert("The server could not confirm the payment from PayPal.");
+                                                }
+                                            }
+                                        }, 1000);
+                                    } else {
+                                        console.error("[CLIENT] Server did not return an orderID. Check terminal logs.");
+                                        alert("An error occurred while creating the payment session.");
+                                    }
+                                }}>
+                                    Add Pey Coins
+                                </button>
                             </div>
                         </div>
                         <button className="btn-v5" style={{ width: '100%', color: 'red', marginBottom: 10 }} onClick={() => { localStorage.clear(); window.location.reload(); }}>Logout</button>

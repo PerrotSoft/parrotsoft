@@ -32,7 +32,7 @@ export async function GET(request) {
             case 'disk_info': return NextResponse.json({ owner: u, database: "Turso/LibSQL" });
             case 'disk_global': return NextResponse.json(await actions.getGlobalSearchList());
             case 'disk_raw': return NextResponse.json(await actions.getUserFiles(u));
-            case 'disk_ls': 
+            case 'db_ls': 
                 return NextResponse.json(await actions.pdb_list(u));
             case 'db_create': 
                 return NextResponse.json(await actions.pdb_create(u, args));
