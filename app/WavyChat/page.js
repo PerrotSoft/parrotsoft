@@ -758,6 +758,13 @@ export default function WevyChat() {
                     cursor: pointer;
                     font-size: 12px;
                 }
+                /* Внутри <style jsx> */
+                .batch-actions {
+                    display: flex; /* Делаем контейнер флексовым */
+                    gap: 15px;      /* Увеличиваем расстояние между кнопками "Удалить" и "Отмена" */
+                    right: 140px;   /* Увеличьте это значение (было 125px), чтобы сдвинуть весь блок влево */
+                    position: relative; /* Убедитесь, что позиционирование работает корректно */
+                }
                 .modal-select { flex: 1; }
                 .toggle-sidebar-btn {
                     position: fixed;
