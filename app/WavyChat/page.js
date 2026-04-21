@@ -829,6 +829,80 @@ export default function WevyChat() {
                     border-color: #0070f3;
                     background: #111;
                 }
+                    /* Мобильные стили */
+                @media (max-width: 768px) {
+                    .sidebar {
+                        /* Делаем сайдбар перекрывающим контент, когда он открыт */
+                        position: fixed;
+                        z-index: 1000;
+                        height: 100%;
+                        width: 85%; /* Оставляем кусочек чата видимым сбоку */
+                        min-width: 85%;
+                    }
+
+                    .sidebar.hidden {
+                        width: 0;
+                        min-width: 0;
+                        transform: translateX(-100%); /* Прячем за экран */
+                    }
+
+                    .toggle-sidebar-btn {
+                        /* Сдвигаем кнопку переключателя, чтобы она всегда была под рукой */
+                        left: ${isSidebarVisible ? '85%' : '0px'};
+                        width: 40px;
+                        height: 50px;
+                        top: 10px;
+                    }
+
+                    .chat-area {
+                        width: 100%;
+                    }
+
+                    .chat-header {
+                        padding: 10px 15px;
+                        flex-direction: column; /* Заголовок и кнопки в две строки */
+                        align-items: flex-start;
+                        gap: 10px;
+                    }
+
+                    .batch-actions {
+                        position: static; /* Возвращаем в общий поток */
+                        width: 100%;
+                        justify-content: flex-end;
+                    }
+
+                    .msg-wrapper {
+                        max-width: 90%; /* Сообщения пошире на узком экране */
+                    }
+
+                    .input-panel {
+                        padding: 10px;
+                    }
+
+                    .input-row {
+                        gap: 8px;
+                    }
+
+                    .input-row input {
+                        padding: 10px 15px;
+                        font-size: 14px;
+                    }
+
+                    .tool-btn, .voice-btn, .send-btn {
+                        font-size: 18px; /* Немного уменьшаем кнопки управления */
+                    }
+
+                    .emoji-picker {
+                        width: 90%;
+                        left: 5%;
+                        right: 5%;
+                        bottom: 70px;
+                    }
+
+                    .file-item img {
+                        max-width: 100%; /* Картинки на всю ширину сообщения */
+                    }
+                }
             `}</style>
             
         </div>
