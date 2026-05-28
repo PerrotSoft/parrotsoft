@@ -126,7 +126,7 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
                         { id: '3', name: 'Drive', icon: '📂', url: '/drive' },
                         { id: '4', name: 'DataPedia', icon: '📄', url: '/datapedia' },
                         { id: '5', name: 'WavyChat', icon: '💬', url: '/WavyChat' },
-                        { id: '6', name: 'Web-PStudio', icon: '💻', url: '/web_pstudio.html' },
+                        { id: '6', name: 'Web-PStudio', icon: '💻', url: 'https://pstudio-nine.vercel.app/' },
                         { id: '7', name: 'ParrotOS Installer', icon: '💻', url: '/installer' },
                         { id: '8', name: 'ParrotOS Pley', icon: '💻', url: '/parrotplay' },
                         { id: '9', name: 'ParrotOS DB Manager', icon: '📂', url: '/db-manager' }

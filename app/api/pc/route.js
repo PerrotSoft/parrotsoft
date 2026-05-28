@@ -20,6 +20,7 @@ export async function GET(request) {
 
     try {
         switch (cmd) {
+            case 'auth': return NextResponse.json({ access: !!(await verifyAccess(u, p)) });
             case 'disk_ls': return NextResponse.json(await actions.getDocs(u));
             case 'disk_files': return NextResponse.json(await actions.getUserFiles(u));
             case 'disk_add_proj': return NextResponse.json(await actions.addSearchItem(u, { name: args }));
