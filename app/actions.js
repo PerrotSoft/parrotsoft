@@ -269,6 +269,45 @@ export async function deleteMsgs(ids) {
     args: ids
   });
 }
+export async function kickUser(chatId, username) {
+  'use server';
+  try {
+    await client.execute({
+      sql: "DELETE FROM wc_members WHERE chat_id = ? AND username = ?",
+      args: [chatId, username]
+    });
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+export async function promoteUser(chatId, username) {
+  'use server';
+  try {
+    // Передаем права создателя (admin) другому пользователю
+    await client.execute({
+      sql: "UPDATE wc_chats SET admin = ? WHERE id = ?",
+      args: [username, chatId]
+    });
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
+
+export async function updateChatPassword(chatId, newPassword) {
+  'use server';
+  try {
+    await client.execute({
+      sql: "UPDATE wc_chats SET password = ? WHERE id = ?",
+      args: [newPassword, chatId]
+    });
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e.message };
+  }
+}
 export async function joinCall(chatId, username) {
     'use server';
     const res = await client.execute({

@@ -8,6 +8,15 @@ export default function CallWindow({ currentUser, activeCall, onEnd }) {
     const [isMicMuted, setIsMicMuted] = useState(false);
     const [isCamOff, setIsCamOff] = useState(false);
     const [peerError, setPeerError] = useState(null);
+    const [permissionError, setPermissionError] = useState("");
+    
+    const [audioDevices, setAudioDevices] = useState([]);
+    const [videoDevices, setVideoDevices] = useState([]);
+    const [showMicMenu, setShowMicMenu] = useState(false);
+    const [showCamMenu, setShowCamMenu] = useState(false);
+    const [activeAudioId, setActiveAudioId] = useState(null);
+    const [activeVideoId, setActiveVideoId] = useState(null);
+
     const [isScreenSharing, setIsScreenSharing] = useState(false);
     const screenStreamRef = useRef(null);
     const peerRef = useRef(null);
@@ -18,13 +27,59 @@ export default function CallWindow({ currentUser, activeCall, onEnd }) {
 
     const isHost = currentUser === activeCall.caller;
 
+    const createDummyStream = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = 640; canvas.height = 480;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#111';
+        ctx.fillRect(0, 0, 640, 480);
+        const videoTrack = canvas.captureStream(1).getVideoTracks()[0];
+        videoTrack.enabled = false;
+
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const dest = audioCtx.createMediaStreamDestination();
+        const audioTrack = dest.stream.getAudioTracks()[0];
+        audioTrack.enabled = false;
+
+        return new MediaStream([videoTrack, audioTrack]);
+    };
+
+    const getDevices = async () => {
+        try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            setAudioDevices(devices.filter(d => d.kind === 'audioinput'));
+            setVideoDevices(devices.filter(d => d.kind === 'videoinput'));
+        } catch (e) {
+            console.error("Ошибка получения списка устройств", e);
+        }
+    };
+
+    const initMedia = async (audioId = null, videoId = null) => {
+        try {
+            const constraints = {
+                audio: audioId ? { deviceId: { exact: audioId } } : true,
+                video: videoId ? { deviceId: { exact: videoId } } : true
+            };
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            setPermissionError("");
+            return stream;
+        } catch (e) {
+            console.warn("Нет доступа к камере/микрофону, используем заглушку", e);
+            setPermissionError("Доступ к устройствам ограничен. Разрешите в настройках браузера!");
+            setIsMicMuted(true);
+            setIsCamOff(true);
+            return createDummyStream();
+        }
+    };
+
     useEffect(() => {
         if (peerRef.current) return;
 
-        // ИСПРАВЛЕНИЕ ОШИБКИ ID: Генерируем более длинный и уникальный суффикс
+        const safeUser = currentUser.replace(/[^a-zA-Z0-9_-]/g, '');
+
         const myPeerId = isHost 
-            ? currentUser 
-            : `${currentUser}_${Math.random().toString(36).substring(2, 9)}`;
+            ? safeUser 
+            : `${safeUser}_${Math.random().toString(36).substring(2, 9)}`;
         
         const peer = new Peer(myPeerId, {
             config: { 'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }] },
@@ -33,10 +88,23 @@ export default function CallWindow({ currentUser, activeCall, onEnd }) {
         peerRef.current = peer;
 
         peer.on('open', async (id) => {
+            if (peer.destroyed) return;
             try {
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+                await navigator.mediaDevices.getUserMedia({ audio: true, video: true }).catch(() => {});
+                await getDevices();
+
+                const stream = await initMedia();
                 localStreamRef.current = stream;
-                if (videoRefs.current['me']) videoRefs.current['me'].srcObject = stream;
+
+                const aTrack = stream.getAudioTracks()[0];
+                const vTrack = stream.getVideoTracks()[0];
+                if (aTrack && aTrack.getSettings().deviceId) setActiveAudioId(aTrack.getSettings().deviceId);
+                if (vTrack && vTrack.getSettings().deviceId) setActiveVideoId(vTrack.getSettings().deviceId);
+
+                if (videoRefs.current['me']) {
+                    videoRefs.current['me'].srcObject = stream;
+                    videoRefs.current['me'].muted = true;
+                }
 
                 if (!isHost) {
                     const conn = peer.connect(activeCall.caller);
@@ -46,17 +114,14 @@ export default function CallWindow({ currentUser, activeCall, onEnd }) {
                 }
                 setStatus(isHost ? "Организатор конференции" : "Подключено");
             } catch (e) { 
-                setStatus("Ошибка доступа к камере/микрофону"); 
-                console.error(e);
+                setStatus("Критическая ошибка инициализации"); 
             }
         });
 
-        // Обработка ошибки занятого ID (если хост обновил страницу и ID еще висит)
         peer.on('error', (err) => {
-            console.error('PeerJS Error:', err);
             if (err.type === 'unavailable-id') {
-                setStatus("Ошибка: ID занят. Переподключение...");
-                setPeerError("Сессия еще активна в другой вкладке или зависла. Подождите 10 секунд и обновите страницу.");
+                setStatus("Ошибка: ID занят.");
+                setPeerError("Сессия активна в другой вкладке. Подождите 5 секунд и обновите.");
             }
         });
 
@@ -83,56 +148,84 @@ export default function CallWindow({ currentUser, activeCall, onEnd }) {
             peerRef.current = null;
         };
     }, []);
-    const toggleScreenShare = async () => {
-    try {
-        if (!isScreenSharing) {
-            // Запрашиваем поток экрана
-            const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-            screenStreamRef.current = stream;
-            const screenTrack = stream.getVideoTracks()[0];
 
-            // Заменяем трек для всех активных звонков
+    const switchDevice = async (kind, deviceId) => {
+        try {
+            const constraints = kind === 'audio' 
+                ? { audio: { deviceId: { exact: deviceId } } } 
+                : { video: { deviceId: { exact: deviceId } } };
+            
+            const newStream = await navigator.mediaDevices.getUserMedia(constraints);
+            const newTrack = kind === 'audio' ? newStream.getAudioTracks()[0] : newStream.getVideoTracks()[0];
+            const oldTrack = kind === 'audio' ? localStreamRef.current.getAudioTracks()[0] : localStreamRef.current.getVideoTracks()[0];
+
+            if (oldTrack) {
+                localStreamRef.current.removeTrack(oldTrack);
+                oldTrack.stop();
+            }
+            localStreamRef.current.addTrack(newTrack);
+
             callsRef.current.forEach(call => {
-                const sender = call.peerConnection.getSenders().find(s => s.track.kind === 'video');
-                if (sender) sender.replaceTrack(screenTrack);
+                const sender = call.peerConnection.getSenders().find(s => s.track && s.track.kind === kind);
+                if (sender) sender.replaceTrack(newTrack);
             });
 
-            // Обновляем свое превью
-            if (videoRefs.current['me']) videoRefs.current['me'].srcObject = stream;
-
-            // Обработка нажатия кнопки "Остановить показ" в браузере
-            screenTrack.onended = () => stopScreenShare();
-
-            setIsScreenSharing(true);
-        } else {
-            stopScreenShare();
+            if (kind === 'audio') {
+                setActiveAudioId(deviceId);
+                setIsMicMuted(!newTrack.enabled);
+                setShowMicMenu(false);
+            } else {
+                setActiveVideoId(deviceId);
+                setIsCamOff(!newTrack.enabled);
+                setShowCamMenu(false);
+                if (videoRefs.current['me']) videoRefs.current['me'].srcObject = localStreamRef.current;
+            }
+            setPermissionError("");
+        } catch (e) {
+            console.error("Ошибка переключения устройства", e);
+            setPermissionError("Не удалось переключить устройство. Проверьте разрешения.");
         }
-    } catch (e) {
-        console.error("Ошибка захвата экрана:", e);
-    }
-};
+    };
+
+    const toggleScreenShare = async () => {
+        try {
+            if (!isScreenSharing) {
+                const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+                screenStreamRef.current = stream;
+                const screenTrack = stream.getVideoTracks()[0];
+
+                callsRef.current.forEach(call => {
+                    const sender = call.peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
+                    if (sender) sender.replaceTrack(screenTrack);
+                });
+
+                if (videoRefs.current['me']) videoRefs.current['me'].srcObject = stream;
+                screenTrack.onended = () => stopScreenShare();
+                setIsScreenSharing(true);
+            } else {
+                stopScreenShare();
+            }
+        } catch (e) {
+            console.error("Ошибка захвата экрана:", e);
+        }
+    };
 
     const stopScreenShare = () => {
         if (!localStreamRef.current) return;
-
         const videoTrack = localStreamRef.current.getVideoTracks()[0];
 
-        // Возвращаем камеру всем участникам
         callsRef.current.forEach(call => {
-            const sender = call.peerConnection.getSenders().find(s => s.track.kind === 'video');
+            const sender = call.peerConnection.getSenders().find(s => s.track && s.track.kind === 'video');
             if (sender) sender.replaceTrack(videoTrack);
         });
 
-        // Возвращаем камеру себе
         if (videoRefs.current['me']) videoRefs.current['me'].srcObject = localStreamRef.current;
-
-        // Останавливаем поток экрана
         screenStreamRef.current?.getTracks().forEach(t => t.stop());
         setIsScreenSharing(false);
     };
+
     const setupDataChannel = (conn) => {
         connectionsRef.current.set(conn.peer, conn);
-        
         conn.on('data', (data) => {
             if (data.type === 'DIE') onEnd(); 
             if (data.type === 'BYE') removePeer(data.userId); 
@@ -174,40 +267,42 @@ export default function CallWindow({ currentUser, activeCall, onEnd }) {
 
     const handleSmartExit = () => {
         if (isHost) {
-            connectionsRef.current.forEach(conn => {
-                if (conn.open) conn.send({ type: 'DIE' });
-            });
-            setTimeout(() => {
-                onEnd();
-                window.location.reload(); 
-            }, 300);
+            connectionsRef.current.forEach(conn => { if (conn.open) conn.send({ type: 'DIE' }); });
         } else {
-            connectionsRef.current.forEach(conn => {
-                if (conn.open) conn.send({ type: 'BYE', userId: peerRef.current.id });
-            });
-            setTimeout(() => {
-                window.location.reload(); 
-            }, 300);
+            connectionsRef.current.forEach(conn => { if (conn.open) conn.send({ type: 'BYE', userId: peerRef.current.id }); });
+        }
+        
+        if (peerRef.current) {
+            peerRef.current.destroy();
+        }
+        
+        setTimeout(() => { window.location.reload(); }, 300);
+    };
+
+    const toggleMic = async () => {
+        let track = localStreamRef.current?.getAudioTracks()[0];
+        if (!track || track.readyState === 'ended' || track.label === '') {
+            await initMedia(activeAudioId, activeVideoId);
+            track = localStreamRef.current?.getAudioTracks()[0];
+        }
+        if (track) { 
+            track.enabled = !track.enabled; 
+            setIsMicMuted(!track.enabled); 
         }
     };
 
-    const toggleMic = () => {
-        const t = localStreamRef.current?.getAudioTracks()[0];
-        if (t) { 
-            t.enabled = !t.enabled; 
-            setIsMicMuted(!t.enabled); 
+    const toggleCam = async () => {
+        let track = localStreamRef.current?.getVideoTracks()[0];
+        if (!track || track.readyState === 'ended' || track.label === '') {
+            await initMedia(activeAudioId, activeVideoId);
+            track = localStreamRef.current?.getVideoTracks()[0];
+        }
+        if (track) { 
+            track.enabled = !track.enabled; 
+            setIsCamOff(!track.enabled); 
         }
     };
 
-    const toggleCam = () => {
-        const t = localStreamRef.current?.getVideoTracks()[0];
-        if (t) { 
-            t.enabled = !t.enabled; 
-            setIsCamOff(!t.enabled); 
-        }
-    };
-
-    // Определение сетки в зависимости от количества людей
     const totalUsers = participants.length + 1;
     let gridClass = "grid-multi";
     if (totalUsers === 1) gridClass = "grid-single";
@@ -215,7 +310,6 @@ export default function CallWindow({ currentUser, activeCall, onEnd }) {
 
     return (
         <div className="call-ui">
-            {/* Верхняя панель со статусом */}
             <div className="top-bar">
                 <div className="status-badge">
                     <span className="pulse-dot"></span>
@@ -224,11 +318,9 @@ export default function CallWindow({ currentUser, activeCall, onEnd }) {
                 <div className="room-info">Вызов: {activeCall.title || 'WavyChat'}</div>
             </div>
 
-            {peerError && (
-                <div className="error-banner">{peerError}</div>
-            )}
+            {peerError && <div className="error-banner">{peerError}</div>}
+            {permissionError && <div className="error-banner permission-warn">{permissionError}</div>}
 
-            {/* Сетка с видео */}
             <div className={`video-container ${gridClass}`}>
                 <div className="v-card">
                     {isCamOff ? (
@@ -236,15 +328,11 @@ export default function CallWindow({ currentUser, activeCall, onEnd }) {
                     ) : (
                         <video 
                             ref={el => videoRefs.current['me'] = el} 
-                            autoPlay 
-                            playsInline 
-                            muted 
-                            className={!isScreenSharing ? "mirror" : ""} 
+                            autoPlay playsInline muted 
+                            style={{ transform: isScreenSharing ? 'scaleX(1)' : 'scaleX(-1)' }}
                         />
                     )}
-                    <div className="user-label">
-                        Вы {isMicMuted && <span className="muted-icon">🔇</span>}
-                    </div>
+                    <div className="user-label">Вы {isMicMuted && <span className="muted-icon">🔇</span>}</div>
                 </div>
 
                 {participants.map(id => (
@@ -255,22 +343,53 @@ export default function CallWindow({ currentUser, activeCall, onEnd }) {
                 ))}
             </div>
 
-            {/* Плавающая нижняя панель управления */}
             <div className="controls-wrapper">
                 <div className="controls-glass">
-                    <button onClick={toggleMic} className={`ctrl-btn ${isMicMuted ? 'danger' : ''}`} title="Микрофон">
-                        {isMicMuted ? '🔇' : '🎙️'}
-                    </button>
-                    <button onClick={toggleCam} className={`ctrl-btn ${isCamOff ? 'danger' : ''}`} title="Камера">
-                        {isCamOff ? '🚫' : '📹'}
-                    </button>
-                    <button 
-                        onClick={toggleScreenShare} 
-                        className={`ctrl-btn ${isScreenSharing ? 'active' : ''}`} 
-                        title="Демонстрация экрана"
-                    >
+                    
+                    {/* Кнопка Микрофона с меню */}
+                    <div className="btn-group">
+                        <button onClick={toggleMic} className={`ctrl-btn ${isMicMuted ? 'danger' : ''}`} title="Микрофон">
+                            {isMicMuted ? '🔇' : '🎙️'}
+                        </button>
+                        <button className="ctrl-arrow" onClick={() => { setShowMicMenu(!showMicMenu); setShowCamMenu(false); getDevices(); }}>
+                            ^
+                        </button>
+                        {showMicMenu && (
+                            <div className="device-menu">
+                                <div className="menu-title">Микрофон</div>
+                                {audioDevices.length > 0 ? audioDevices.map(d => (
+                                    <div key={d.deviceId} className={`menu-item ${activeAudioId === d.deviceId ? 'active' : ''}`} onClick={() => switchDevice('audio', d.deviceId)}>
+                                        {d.label || `Микрофон ${d.deviceId.slice(0, 5)}...`}
+                                    </div>
+                                )) : <div className="menu-item disabled">Устройства не найдены</div>}
+                            </div>
+                        )}
+                    </div>
+
+                    {/* Кнопка Камеры с меню */}
+                    <div className="btn-group">
+                        <button onClick={toggleCam} className={`ctrl-btn ${isCamOff ? 'danger' : ''}`} title="Камера">
+                            {isCamOff ? '🚫' : '📹'}
+                        </button>
+                        <button className="ctrl-arrow" onClick={() => { setShowCamMenu(!showCamMenu); setShowMicMenu(false); getDevices(); }}>
+                            ^
+                        </button>
+                        {showCamMenu && (
+                            <div className="device-menu">
+                                <div className="menu-title">Камера</div>
+                                {videoDevices.length > 0 ? videoDevices.map(d => (
+                                    <div key={d.deviceId} className={`menu-item ${activeVideoId === d.deviceId ? 'active' : ''}`} onClick={() => switchDevice('video', d.deviceId)}>
+                                        {d.label || `Камера ${d.deviceId.slice(0, 5)}...`}
+                                    </div>
+                                )) : <div className="menu-item disabled">Устройства не найдены</div>}
+                            </div>
+                        )}
+                    </div>
+
+                    <button onClick={toggleScreenShare} className={`ctrl-btn screen-btn ${isScreenSharing ? 'active' : ''}`} title="Демонстрация экрана">
                         {isScreenSharing ? '⏹️' : '🖥️'}
                     </button>
+                    
                     <div className="divider"></div>
                     <button onClick={handleSmartExit} className="ctrl-btn exit" title="Завершить">
                         {isHost ? "Завершить" : "Выйти"}
@@ -280,18 +399,16 @@ export default function CallWindow({ currentUser, activeCall, onEnd }) {
 
             <style jsx>{`
                 .call-ui {
-                    position: fixed; inset: 0; background: #0a0a0c; z-index: 10000;
+                    position: fixed; inset: 0; background: #050505; z-index: 10000;
                     display: flex; flex-direction: column; font-family: 'Segoe UI', system-ui, sans-serif;
                 }
-
-                /* Верхняя панель */
                 .top-bar {
                     position: absolute; top: 0; left: 0; width: 100%; padding: 20px;
                     display: flex; justify-content: space-between; align-items: center;
                     z-index: 10; pointer-events: none;
                 }
                 .status-badge {
-                    background: rgba(0,0,0,0.6); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.1);
+                    background: rgba(20, 20, 25, 0.8); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,0.05);
                     padding: 8px 16px; border-radius: 20px; color: #fff; font-size: 13px;
                     display: flex; align-items: center; gap: 8px; font-weight: 500;
                 }
@@ -299,106 +416,112 @@ export default function CallWindow({ currentUser, activeCall, onEnd }) {
                     width: 8px; height: 8px; background: #00ff95; border-radius: 50%;
                     box-shadow: 0 0 10px #00ff95; animation: pulse 2s infinite;
                 }
-                .room-info { color: rgba(255,255,255,0.6); font-size: 14px; font-weight: bold; background: rgba(0,0,0,0.4); padding: 5px 15px; border-radius: 12px; }
+                .room-info { color: rgba(255,255,255,0.6); font-size: 14px; font-weight: bold; background: rgba(20,20,25,0.8); padding: 5px 15px; border-radius: 12px; }
 
                 @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
 
                 .error-banner {
                     position: absolute; top: 70px; left: 50%; transform: translateX(-50%);
                     background: #ea4335; color: white; padding: 10px 20px; border-radius: 8px;
-                    z-index: 20; font-size: 13px; box-shadow: 0 4px 15px rgba(234, 67, 53, 0.4);
+                    z-index: 20; font-size: 13px; box-shadow: 0 4px 15px rgba(234, 67, 53, 0.4); text-align: center;
                 }
+                .permission-warn { background: #fbbc04; color: #000; box-shadow: 0 4px 15px rgba(251, 188, 4, 0.4); }
 
-                /* Контейнер видео */
                 .video-container {
                     flex: 1; padding: 80px 20px 100px 20px; display: grid; gap: 15px;
                     height: 100vh; overflow-y: auto; align-content: center;
                 }
-
-                /* Динамическая сетка */
                 .grid-single { grid-template-columns: 1fr; max-width: 900px; margin: 0 auto; width: 100%; height: 80vh; }
                 .grid-double { grid-template-columns: repeat(2, 1fr); max-width: 1200px; margin: 0 auto; height: 70vh; }
                 .grid-multi { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
-                /* Зеркалим только если это камера, а не экран */
-                .mirror-self {
-                    transform: ${isScreenSharing ? 'scaleX(1)' : 'scaleX(-1)'};
-                }
+                
                 .v-card {
-                    background: #111; border-radius: 20px; position: relative; overflow: hidden;
+                    background: #111; border-radius: 16px; position: relative; overflow: hidden;
                     border: 1px solid rgba(255,255,255,0.05); box-shadow: 0 10px 30px rgba(0,0,0,0.5);
                     display: flex; align-items: center; justify-content: center;
                     aspect-ratio: 16/9; width: 100%; height: 100%;
                 }
                 video { width: 100%; height: 100%; object-fit: cover; }
-                
 
                 .avatar-placeholder {
                     width: 100px; height: 100px; border-radius: 50%;
-                    background: linear-gradient(135deg, #0070f3, #00c6ff);
+                    background: linear-gradient(135deg, #333, #555);
                     display: flex; align-items: center; justify-content: center;
-                    font-size: 40px; font-weight: bold; color: white; box-shadow: 0 4px 20px rgba(0, 112, 243, 0.4);
+                    font-size: 40px; font-weight: bold; color: white; 
                 }
 
                 .user-label {
                     position: absolute; bottom: 15px; left: 15px;
-                    background: rgba(0,0,0,0.6); backdrop-filter: blur(5px);
+                    background: rgba(0,0,0,0.7); backdrop-filter: blur(5px);
                     padding: 6px 14px; border-radius: 10px; font-size: 13px; color: #fff;
                     display: flex; align-items: center; gap: 6px; font-weight: 500;
-                    border: 1px solid rgba(255,255,255,0.1);
                 }
                 .muted-icon { color: #ff4d4d; }
 
-                /* Панель управления */
+                /* Панель управления (Google Meet Style) */
                 .controls-wrapper {
                     position: absolute; bottom: 30px; left: 0; width: 100%;
-                    display: flex; justify-content: center; pointer-events: none;
+                    display: flex; justify-content: center; pointer-events: none; z-index: 50;
                 }
                 .controls-glass {
-                    background: rgba(30, 30, 35, 0.75); backdrop-filter: blur(15px);
-                    border: 1px solid rgba(255,255,255,0.1); padding: 10px 20px;
-                    border-radius: 25px; display: flex; gap: 15px; align-items: center;
-                    pointer-events: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+                    background: #202124; 
+                    padding: 10px 20px; border-radius: 30px; display: flex; gap: 10px; align-items: center;
+                    pointer-events: auto; box-shadow: 0 4px 15px rgba(0,0,0,0.5);
                 }
+                
+                .btn-group { display: flex; align-items: center; position: relative; background: #3c4043; border-radius: 25px; margin: 0 5px;}
+                
                 .ctrl-btn {
-                    width: 50px; height: 50px; border-radius: 50%; border: none;
-                    background: rgba(255,255,255,0.1); color: #fff; font-size: 20px;
+                    width: 45px; height: 45px; border: none; border-radius: 50%;
+                    background: transparent; color: #fff; font-size: 18px;
                     cursor: pointer; transition: all 0.2s ease; display: flex;
                     align-items: center; justify-content: center;
                 }
-                .ctrl-btn:hover { background: rgba(255,255,255,0.2); transform: translateY(-2px); }
+                .ctrl-btn:hover { background: rgba(255,255,255,0.1); }
                 .ctrl-btn.danger { background: #ea4335; color: white; }
-                .ctrl-btn.danger:hover { background: #ff5252; box-shadow: 0 0 15px rgba(234, 67, 53, 0.4); }
-                
-                .divider { width: 1px; height: 30px; background: rgba(255,255,255,0.1); }
+                .ctrl-btn.danger:hover { background: #ff5252; }
+                .ctrl-btn.screen-btn { background: #3c4043; margin: 0 5px; }
+                .ctrl-btn.screen-btn.active { background: #8ab4f8; color: #202124; }
+
+                .ctrl-arrow {
+                    background: transparent; border: none; color: white; 
+                    padding: 0 10px 0 5px; cursor: pointer; border-radius: 0 25px 25px 0;
+                    height: 45px; display: flex; align-items: center; opacity: 0.7;
+                }
+                .ctrl-arrow:hover { opacity: 1; background: rgba(255,255,255,0.1); }
+
+                /* Выпадающее меню устройств */
+                .device-menu {
+                    position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
+                    background: #28292c; border-radius: 8px; padding: 10px 0;
+                    min-width: 200px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); border: 1px solid #3c4043;
+                }
+                .menu-title { padding: 5px 15px; font-size: 12px; color: #9aa0a6; text-transform: uppercase; font-weight: bold; margin-bottom: 5px; }
+                .menu-item { padding: 10px 15px; color: white; font-size: 14px; cursor: pointer; transition: 0.2s; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 250px;}
+                .menu-item:hover { background: #3c4043; }
+                .menu-item.active { color: #8ab4f8; font-weight: bold; }
+                .menu-item.disabled { color: #5f6368; cursor: default; }
+                .menu-item.disabled:hover { background: transparent; }
+
+                .divider { width: 1px; height: 30px; background: rgba(255,255,255,0.2); margin: 0 10px; }
                 
                 .ctrl-btn.exit {
-                    width: auto; padding: 0 25px; border-radius: 25px;
-                    background: #ea4335; font-size: 14px; font-weight: bold; letter-spacing: 1px; text-transform: uppercase;
+                    width: auto; padding: 0 20px; border-radius: 25px;
+                    background: #ea4335; font-size: 14px; font-weight: bold;
                 }
                 .ctrl-btn.exit:hover { background: #ff5252; box-shadow: 0 0 20px rgba(234, 67, 53, 0.5); }
 
-                /* МОБИЛЬНАЯ АДАПТАЦИЯ */
                 @media (max-width: 768px) {
                     .top-bar { padding: 15px; flex-direction: column; align-items: flex-start; gap: 10px; }
-                    .room-info { display: none; } /* Скрываем название комнаты на мобилках для экономии места */
-                    
+                    .room-info { display: none; }
                     .video-container { padding: 70px 10px 90px 10px; gap: 10px; }
-                    
-                    /* На мобилках карточки становятся вертикальными, если людей двое */
                     .grid-double { grid-template-columns: 1fr; grid-template-rows: repeat(2, 1fr); height: 100%; }
                     .grid-multi { grid-template-columns: repeat(2, 1fr); }
-                    
-                    .v-card { border-radius: 15px; }
                     .controls-wrapper { bottom: 15px; }
-                    .controls-glass { padding: 8px 15px; gap: 10px; border-radius: 20px; }
-                    .ctrl-btn { width: 45px; height: 45px; font-size: 18px; }
-                    .ctrl-btn.exit { padding: 0 15px; font-size: 12px; }
-                }
-                video { 
-                    width: 100%; 
-                    height: 100%; 
-                    object-fit: cover; 
-                    transform: scaleX(-1); /* Отражение по горизонтали */
+                    .controls-glass { padding: 5px 10px; gap: 5px; }
+                    .btn-group { margin: 0; }
+                    .ctrl-btn { width: 40px; height: 40px; font-size: 16px; }
+                    .ctrl-btn.exit { padding: 0 15px; font-size: 12px; height: 40px; }
                 }
             `}</style>
         </div>
