@@ -1110,7 +1110,45 @@ export async function getRecommendedVideos() {
     return { success: false, error: e.message };
   }
 }
+export async function searchVideos(query) {
+  'use server';
+  try {
+    const rs = await client.execute({
+      sql: "SELECT * FROM videos WHERE title LIKE ? OR description LIKE ?",
+      args: [`%${query}%`, `%${query}%`]
+    });
+    return rs.rows;
+  } catch (e) {
+    return [];
+  }
+}
 
+export async function toggleLike(videoId, username) {
+  'use server';
+  try {
+    // Простая логика: если лайк есть — удалить, если нет — добавить
+    const check = await client.execute({
+      sql: "SELECT 1 FROM likes WHERE video_id = ? AND username = ?",
+      args: [String(videoId), username]
+    });
+
+    if (check.rows.length > 0) {
+      await client.execute({
+        sql: "DELETE FROM likes WHERE video_id = ? AND username = ?",
+        args: [String(videoId), username]
+      });
+      return { liked: false };
+    } else {
+      await client.execute({
+        sql: "INSERT INTO likes (video_id, username) VALUES (?, ?)",
+        args: [String(videoId), username]
+      });
+      return { liked: true };
+    }
+  } catch (e) {
+    return { error: e.message };
+  }
+}
 export async function getAllVideos() {
   'use server';
   try {
