@@ -775,7 +775,15 @@ export default function WavyTubePage() {
         }
         @keyframes spin { 100% { transform: rotate(360deg); } }
         
-        .quality-selector { position: absolute; top: 12px; right: 12px; background: rgba(0,0,0,0.8); padding: 5px 10px; border-radius: 8px; z-index: 20; border: 1px solid rgba(255,255,255,0.1); }
+        .quality-selector { 
+              position: absolute; /* Убедитесь, что у .video-wrapper стоит position: relative */
+              bottom: 70px;       /* Поднимаем над прогресс-баром (высота прогресс-бара + отступ) */
+              right: 15px;        /* Отступ справа */
+              padding: 6px 10px;
+              background: rgba(0, 0, 0, 0.7);
+              border-radius: 4px;
+              z-index: 10;
+          }
         .quality-selector select { background: transparent; color: #fff; border: none; outline: none; font-size: 13px; cursor: pointer; font-weight: bold; }
         
         .video-details .title { font-size: 20px; font-weight: 600; margin: 0 0 16px 0; }
@@ -862,7 +870,15 @@ export default function WavyTubePage() {
           .action-group { width: 100%; display: flex; }
           .btn-action { flex: 1; text-align: center; }
           
-          .quality-selector { top: 8px; right: 8px; padding: 3px 6px; }
+          .quality-selector { 
+              position: absolute; /* Убедитесь, что у .video-wrapper стоит position: relative */
+              bottom: 45px;       /* Поднимаем над прогресс-баром (высота прогресс-бара + отступ) */
+              right: 15px;        /* Отступ справа */
+              padding: 6px 10px;
+              background: rgba(0, 0, 0, 0.7);
+              border-radius: 4px;
+              z-index: 10;
+          }
           .quality-selector select { font-size: 12px; }
           
           .video-grid { grid-template-columns: 1fr; gap: 16px; }
