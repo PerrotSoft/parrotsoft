@@ -956,344 +956,148 @@ export async function generateFullBackup() {
   }
 }
 export async function ensureVideoTables() {
-  'use server';
-  try {
-    await client.execute(`
-      CREATE TABLE IF NOT EXISTS channels (
-        id TEXT PRIMARY KEY,
-        username TEXT UNIQUE,
-        channel_name TEXT,
-        subscribers INTEGER DEFAULT 0,
-        total_watch_time INTEGER DEFAULT 0,
-        created_at INTEGER
-      )
-    `);
-
-    await client.execute(`
-      CREATE TABLE IF NOT EXISTS channel_subscriptions (
-        subscriber_username TEXT,
-        target_username TEXT,
-        created_at INTEGER,
-        PRIMARY KEY (subscriber_username, target_username)
-      )
-    `);
-
-    await client.execute(`
-      CREATE TABLE IF NOT EXISTS videos (
-        id TEXT PRIMARY KEY,
-        channel_id TEXT,
-        title TEXT,
-        description TEXT,
-        duration INTEGER,
-        created_at INTEGER,
-        views INTEGER DEFAULT 0,
-        likes INTEGER DEFAULT 0,
-        dislikes INTEGER DEFAULT 0,
-        trust_rating INTEGER DEFAULT 50,
-        watch_time INTEGER DEFAULT 0,
-        settings TEXT DEFAULT '{"likes":true,"dislikes":true,"recs":true}',
-        FOREIGN KEY(channel_id) REFERENCES channels(id) ON DELETE CASCADE
-      )
-    `);
-
-    await client.execute(`
-      CREATE TABLE IF NOT EXISTS video_hls_files (
-        video_id TEXT,
-        filename TEXT,
-        data BLOB,
-        PRIMARY KEY (video_id, filename),
-        FOREIGN KEY(video_id) REFERENCES videos(id) ON DELETE CASCADE
-      )
-    `);
-
-    await client.execute(`
-      CREATE TABLE IF NOT EXISTS thumbnails (
-        video_id TEXT PRIMARY KEY,
-        image_data BLOB NOT NULL,
-        mime_type TEXT NOT NULL,
-        FOREIGN KEY(video_id) REFERENCES videos(id) ON DELETE CASCADE
-      )
-    `);
-
-    await client.execute(`
-      CREATE TABLE IF NOT EXISTS video_comments (
-        id TEXT PRIMARY KEY, 
-        video_id TEXT, 
-        username TEXT, 
-        text TEXT, 
-        created_at INTEGER, 
-        FOREIGN KEY(video_id) REFERENCES videos(id) ON DELETE CASCADE
-      )
-    `);
-
-    return { success: true };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
+  await client.execute(`CREATE TABLE IF NOT EXISTS channels (id TEXT PRIMARY KEY, username TEXT UNIQUE, handle TEXT UNIQUE, subscribers INTEGER DEFAULT 0, avatar TEXT)`);
+  await client.execute(`CREATE TABLE IF NOT EXISTS videos (id TEXT PRIMARY KEY, channel_id TEXT, title TEXT, description TEXT, username TEXT, isShort INTEGER DEFAULT 0, views INTEGER DEFAULT 0, trust_rating INTEGER DEFAULT 50, settings TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+  await client.execute(`CREATE TABLE IF NOT EXISTS likes (video_id TEXT, username TEXT, reaction_type TEXT, PRIMARY KEY (video_id, username))`);
+  await client.execute(`CREATE TABLE IF NOT EXISTS subscriptions (subscriber TEXT, channel TEXT, PRIMARY KEY (subscriber, channel))`);
+  await client.execute(`CREATE TABLE IF NOT EXISTS playlists (id TEXT PRIMARY KEY, username TEXT, name TEXT, is_system BOOLEAN DEFAULT 0)`);
+  await client.execute(`CREATE TABLE IF NOT EXISTS playlist_items (playlist_id TEXT, video_id TEXT, PRIMARY KEY (playlist_id, video_id))`);
+  await client.execute(`CREATE TABLE IF NOT EXISTS comments (id TEXT PRIMARY KEY, video_id TEXT, username TEXT, text TEXT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP)`);
+  return { success: true };
 }
 
-export async function ensureUserChannel(username) {
-  'use server';
+
+// ★ FIX: Turso Row objects carry prototype methods that Next.js cannot
+//   serialize across the Server→Client boundary ("Only plain objects" error).
+//   Strip them here at the data-access layer so callers always get plain {}.
+const toPlainRows = (rows) => rows.map(r => {
+  const o = {};
+  for (const k of Object.keys(r)) o[k] = r[k] ?? null;
+  return o;
+});
+const toPlainRow = (r) => {
+  if (!r) return null;
+  const o = {};
+  for (const k of Object.keys(r)) o[k] = r[k] ?? null;
+  return o;
+};
+
+export async function getAllVideos() {
+  await ensureVideoTables();
   try {
-    const rs = await client.execute({
-      sql: "SELECT * FROM channels WHERE username = ?",
-      args: [String(username)]
-    });
-
-    if (rs.rows.length > 0) {
-      return { success: true, channelId: rs.rows[0].id, channelData: JSON.parse(JSON.stringify(rs.rows[0])) };
-    }
-
-    const channelId = "ch_" + Math.random().toString(36).substring(2, 15);
-    await client.execute({
-      sql: "INSERT INTO channels (id, username, channel_name, created_at) VALUES (?, ?, ?, ?)",
-      args: [channelId, String(username), String(username), Date.now()]
-    });
-
-    return { success: true, channelId, channelData: { id: channelId, username, channel_name: username, subscribers: 0, total_watch_time: 0 } };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-}
-
-export async function createVideoRecordEx(username, videoId, title, description, duration, settingsJSON) {
-  'use server';
-  try {
-    const channelRes = await ensureUserChannel(username);
-    if (!channelRes.success) throw new Error(channelRes.error);
-
-    await client.execute({
-      sql: `INSERT INTO videos (id, channel_id, title, description, duration, created_at, views, likes, dislikes, trust_rating, settings) 
-            VALUES (?, ?, ?, ?, ?, ?, 0, 0, 0, 50, ?)`,
-      args: [String(videoId), channelRes.channelId, String(title), String(description), Number(duration), Date.now(), String(settingsJSON)]
-    });
-
-    return { success: true, videoId };
-  } catch (e) {
-    return { success: false, error: e.message };
-  }
-}
-
-export async function uploadHlsFileAction(videoId, filename, formData) {
-  'use server';
-  try {
-    const file = formData.get('file');
-    if (!file) throw new Error("Файл не найден в FormData");
-    
-    const buffer = Buffer.from(await file.arrayBuffer());
-    
-    await client.execute({
-      sql: `INSERT INTO video_hls_files (video_id, filename, data) 
-            VALUES (?, ?, ?) 
-            ON CONFLICT(video_id, filename) DO UPDATE SET data = excluded.data`,
-      args: [String(videoId), String(filename), buffer]
-    });
-    
-    return { success: true };
+    const rs = await client.execute(`
+      SELECT v.*, c.handle, c.avatar,
+             (SELECT COUNT(*) FROM likes WHERE video_id = v.id AND reaction_type = 'like') as likes,
+             (SELECT COUNT(*) FROM likes WHERE video_id = v.id AND reaction_type = 'dislike') as dislikes
+      FROM videos v
+      LEFT JOIN channels c ON v.channel_id = c.id
+      ORDER BY v.created_at DESC
+    `);
+    return { success: true, data: toPlainRows(rs.rows) };
   } catch (e) {
     return { success: false, error: e.message };
   }
 }
 
 export async function getRecommendedVideos() {
-  'use server';
+  await ensureVideoTables();
   try {
-    const rs = await client.execute(`
-      SELECT v.*, c.channel_name, c.username, c.subscribers 
-      FROM videos v
-      JOIN channels c ON v.channel_id = c.id
-      ORDER BY (v.views * 2 + v.likes * 5 + v.trust_rating) DESC, v.created_at DESC
-      LIMIT 50
-    `);
-    return { success: true, data: JSON.parse(JSON.stringify(rs.rows)) };
+    const rs = await client.execute(`SELECT v.*, c.avatar FROM videos v LEFT JOIN channels c ON v.channel_id = c.id ORDER BY RANDOM() LIMIT 20`);
+    return { success: true, data: toPlainRows(rs.rows) };
   } catch (e) {
     return { success: false, error: e.message };
   }
 }
-export async function searchVideos(query) {
-  'use server';
-  try {
-    const rs = await client.execute({
-      sql: "SELECT * FROM videos WHERE title LIKE ? OR description LIKE ?",
-      args: [`%${query}%`, `%${query}%`]
-    });
-    return rs.rows;
-  } catch (e) {
-    return [];
-  }
-}
 
-export async function toggleLike(videoId, username) {
-  'use server';
+export async function createVideoRecordEx(username, videoId, title, description, settingsJSON, isShort) {
   try {
-    // Простая логика: если лайк есть — удалить, если нет — добавить
-    const check = await client.execute({
-      sql: "SELECT 1 FROM likes WHERE video_id = ? AND username = ?",
-      args: [String(videoId), username]
-    });
-
-    if (check.rows.length > 0) {
-      await client.execute({
-        sql: "DELETE FROM likes WHERE video_id = ? AND username = ?",
-        args: [String(videoId), username]
-      });
-      return { liked: false };
-    } else {
-      await client.execute({
-        sql: "INSERT INTO likes (video_id, username) VALUES (?, ?)",
-        args: [String(videoId), username]
-      });
-      return { liked: true };
+    let channel = await client.execute({ sql: "SELECT id FROM channels WHERE username = ?", args: [username] });
+    let channelId = channel.rows.length > 0 ? channel.rows[0].id : 'ch_' + Math.random().toString(36).substring(2, 10);
+    
+    if (channel.rows.length === 0) {
+      await client.execute({ sql: "INSERT INTO channels (id, username, handle) VALUES (?, ?, ?)", args: [channelId, username, '@'+username] });
     }
-  } catch (e) {
-    return { error: e.message };
-  }
-}
-export async function getAllVideos() {
-  'use server';
-  try {
-    const rs = await client.execute(`
-      SELECT v.*, c.channel_name, c.username, c.subscribers 
-      FROM videos v
-      JOIN channels c ON v.channel_id = c.id
-      ORDER BY v.created_at DESC
-    `);
-    return { success: true, data: JSON.parse(JSON.stringify(rs.rows)) };
+
+    await client.execute({
+      sql: "INSERT INTO videos (id, channel_id, title, description, username, settings, isShort) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      args: [videoId, channelId, title, description, username, settingsJSON, isShort]
+    });
+    return { success: true };
   } catch (e) {
     return { success: false, error: e.message };
   }
 }
 
-export async function toggleSubscription(targetUsername, currentUsername) {
-  'use server';
+export async function toggleLike(videoId, username, type = 'like') {
   try {
-    if (targetUsername === currentUsername) throw new Error("Нельзя подписаться на свой канал");
-
-    const check = await client.execute({
-      sql: "SELECT * FROM channel_subscriptions WHERE subscriber_username = ? AND target_username = ?",
-      args: [String(currentUsername), String(targetUsername)]
-    });
-
+    const check = await client.execute({ sql: "SELECT reaction_type FROM likes WHERE video_id = ? AND username = ?", args: [videoId, username] });
     if (check.rows.length > 0) {
-      await client.execute({ sql: "DELETE FROM channel_subscriptions WHERE subscriber_username = ? AND target_username = ?", args: [String(currentUsername), String(targetUsername)] });
-      await client.execute({ sql: "UPDATE channels SET subscribers = subscribers - 1 WHERE username = ?", args: [String(targetUsername)] });
-      return { success: true, subscribed: false };
+      if (check.rows[0].reaction_type === type) {
+        await client.execute({ sql: "DELETE FROM likes WHERE video_id = ? AND username = ?", args: [videoId, username] });
+        return { success: true, removed: true };
+      } else {
+        await client.execute({ sql: "UPDATE likes SET reaction_type = ? WHERE video_id = ? AND username = ?", args: [type, videoId, username] });
+      }
     } else {
-      await client.execute({ sql: "INSERT INTO channel_subscriptions (subscriber_username, target_username, created_at) VALUES (?, ?, ?)", args: [String(currentUsername), String(targetUsername), Date.now()] });
-      await client.execute({ sql: "UPDATE channels SET subscribers = subscribers + 1 WHERE username = ?", args: [String(targetUsername)] });
-      return { success: true, subscribed: true };
+      await client.execute({ sql: "INSERT INTO likes (video_id, username, reaction_type) VALUES (?, ?, ?)", args: [videoId, username, type] });
     }
+    return { success: true, removed: false };
   } catch (e) {
     return { success: false, error: e.message };
   }
-}
-
-export async function checkSubscription(targetUsername, currentUsername) {
-  'use server';
-  try {
-    const rs = await client.execute({
-      sql: "SELECT 1 FROM channel_subscriptions WHERE subscriber_username = ? AND target_username = ?",
-      args: [String(currentUsername), String(targetUsername)]
-    });
-    return { success: true, subscribed: rs.rows.length > 0 };
-  } catch (e) { return { success: false, subscribed: false }; }
 }
 
 export async function incrementViews(videoId) {
-  'use server';
-  try {
-    await client.execute({ sql: "UPDATE videos SET views = views + 1 WHERE id = ?", args: [String(videoId)] });
-    return { success: true };
-  } catch (e) { return { success: false }; }
-}
-
-export async function addWatchTime(videoId, channelId, seconds) {
-  'use server';
-  try {
-    await client.execute({ sql: "UPDATE videos SET watch_time = watch_time + ? WHERE id = ?", args: [Number(seconds), String(videoId)] });
-    await client.execute({ sql: "UPDATE channels SET total_watch_time = total_watch_time + ? WHERE id = ?", args: [Number(seconds), String(channelId)] });
-    return { success: true };
-  } catch (e) { return { success: false }; }
-}
-
-export async function incrementLike(videoId) {
-  'use server';
-  try {
-    await client.execute({ sql: "UPDATE videos SET likes = likes + 1 WHERE id = ?", args: [String(videoId)] });
-    return { success: true };
-  } catch (e) { return { success: false }; }
-}
-
-export async function incrementDislike(videoId) {
-  'use server';
-  try {
-    await client.execute({ sql: "UPDATE videos SET dislikes = dislikes + 1 WHERE id = ?", args: [String(videoId)] });
-    return { success: true };
-  } catch (e) { return { success: false }; }
+  await client.execute({ sql: "UPDATE videos SET views = views + 1 WHERE id = ?", args: [videoId] });
 }
 
 export async function addComment(videoId, username, text) {
-  'use server';
-  try {
-    const id = "cmt_" + Math.random().toString(36).substring(2, 15);
-    await client.execute({
-      sql: "INSERT INTO video_comments (id, video_id, username, text, created_at) VALUES (?, ?, ?, ?, ?)",
-      args: [id, String(videoId), String(username), String(text), Date.now()]
-    });
-    return { success: true };
-  } catch (e) { return { success: false, error: e.message }; }
+  const id = "cmt_" + Date.now();
+  await client.execute({ sql: "INSERT INTO comments (id, video_id, username, text) VALUES (?, ?, ?, ?)", args: [id, videoId, username, text] });
+  return { success: true, data: { id, video_id: videoId, username, text, created_at: Date.now() } };
 }
 
 export async function getComments(videoId) {
-  'use server';
-  try {
-    const rs = await client.execute({
-      sql: "SELECT * FROM video_comments WHERE video_id = ? ORDER BY created_at DESC",
-      args: [String(videoId)]
-    });
-    return { success: true, data: JSON.parse(JSON.stringify(rs.rows)) };
-  } catch (e) { return { success: false, error: e.message, data: [] }; }
-}
-
-export async function deleteVideo(videoId, username) {
-  'use server';
-  try {
-    const rs = await client.execute({
-      sql: "SELECT c.username FROM videos v JOIN channels c ON v.channel_id = c.id WHERE v.id = ?",
-      args: [String(videoId)]
-    });
-    
-    if (rs.rows.length === 0 || rs.rows[0].username !== username) throw new Error("Нет доступа.");
-    await client.execute({ sql: "DELETE FROM videos WHERE id = ?", args: [String(videoId)] });
-    return { success: true };
-  } catch (e) { return { success: false, error: e.message }; }
-}
-
-export async function updateVideoDetails(videoId, username, newTitle, newDescription) {
-  'use server';
-  try {
-    const rs = await client.execute({
-      sql: "SELECT c.username FROM videos v JOIN channels c ON v.channel_id = c.id WHERE v.id = ?",
-      args: [String(videoId)]
-    });
-    
-    if (rs.rows.length === 0 || rs.rows[0].username !== username) throw new Error("Нет доступа.");
-    await client.execute({
-      sql: "UPDATE videos SET title = ?, description = ? WHERE id = ?",
-      args: [String(newTitle), String(newDescription), String(videoId)]
-    });
-    return { success: true };
-  } catch (e) { return { success: false, error: e.message }; }
+  const rs = await client.execute({ sql: "SELECT * FROM comments WHERE video_id = ? ORDER BY created_at DESC", args: [videoId] });
+  return { success: true, data: toPlainRows(rs.rows) };
 }
 
 export async function getChannelStats(username) {
-  'use server';
-  try {
-    const rs = await client.execute({
-      sql: "SELECT * FROM channels WHERE username = ?",
-      args: [String(username)]
-    });
-    if (rs.rows.length === 0) return { success: false };
-    return { success: true, data: JSON.parse(JSON.stringify(rs.rows[0])) };
-  } catch (e) { return { success: false, error: e.message }; }
+  const rs = await client.execute({ sql: "SELECT * FROM channels WHERE username = ?", args: [username] });
+  return rs.rows.length > 0 ? toPlainRow(rs.rows[0]) : { subscribers: 0, handle: '@'+username };
+}
+
+export async function toggleSubscription(targetUsername, subscriber) {
+  const rs = await client.execute({ sql: "SELECT 1 FROM subscriptions WHERE subscriber = ? AND channel = ?", args: [subscriber, targetUsername] });
+  if (rs.rows.length > 0) {
+    await client.execute({ sql: "DELETE FROM subscriptions WHERE subscriber = ? AND channel = ?", args: [subscriber, targetUsername] });
+    await client.execute({ sql: "UPDATE channels SET subscribers = subscribers - 1 WHERE username = ?", args: [targetUsername] });
+    return { success: true, isSubscribed: false };
+  } else {
+    await client.execute({ sql: "INSERT INTO subscriptions (subscriber, channel) VALUES (?, ?)", args: [subscriber, targetUsername] });
+    await client.execute({ sql: "UPDATE channels SET subscribers = subscribers + 1 WHERE username = ?", args: [targetUsername] });
+    return { success: true, isSubscribed: true };
+  }
+}
+
+export async function getUserPlaylists(username) {
+  const rs = await client.execute({ sql: "SELECT * FROM playlists WHERE username = ?", args: [username] });
+  const playlists = [];
+  for (const row of rs.rows) {
+    const items = await client.execute({ sql: "SELECT video_id FROM playlist_items WHERE playlist_id = ?", args: [row.id] });
+    // ★ toPlainRow strips Turso prototype; video_id values cast to string primitives
+    playlists.push({ ...toPlainRow(row), videos: items.rows.map(i => String(i.video_id)) });
+  }
+  return playlists;
+}
+
+export async function createPlaylist(username, name, isSystem = 0) {
+  const id = 'pl_' + Math.random().toString(36).substring(2, 10);
+  await client.execute({ sql: "INSERT INTO playlists (id, username, name, is_system) VALUES (?, ?, ?, ?)", args: [id, username, name, isSystem] });
+  return { success: true, id };
+}
+
+export async function addVideoToPlaylist(playlistId, videoId) {
+  await client.execute({ sql: "INSERT OR IGNORE INTO playlist_items (playlist_id, video_id) VALUES (?, ?)", args: [playlistId, videoId] });
+  return { success: true };
 }
