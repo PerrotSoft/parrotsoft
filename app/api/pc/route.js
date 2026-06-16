@@ -59,18 +59,6 @@ export async function GET(request) {
             case 'market_manifest': return NextResponse.json(await actions.apiGetManifest(args));
             case 'market_resolve': return NextResponse.json(await actions.apiResolvePackage(args));
             case 'market_search_api': return NextResponse.json(await actions.apiSearchPacks(args));
-            case 'tube_init': return NextResponse.json(await actions.setupSystemDatabases(u));
-            case 'tube_all': return NextResponse.json(await actions.getVideos('all'));
-            case 'tube_cat': return NextResponse.json(await actions.getVideos(args));
-            case 'tube_backup': return NextResponse.json(await actions.generateFullBackup(u));
-            case 'tube_search': 
-                const v = await actions.getVideos('all');
-                return NextResponse.json(v.filter(i => i.title.includes(args)));
-            case 'tube_my':
-                const allV = await actions.getVideos('all');
-                return NextResponse.json(allV.filter(i => i.author === u));
-            case 'tube_ban': return NextResponse.json(await actions.adminModifyUser(args, 'ban'));
-            case 'tube_strike': return NextResponse.json(await actions.adminModifyUser(args, 'strike'));
             case 'sys_ping': return NextResponse.json({ pong: true, time: Date.now() });
             case 'sys_node': return NextResponse.json({ version: process.version });
             case 'sys_uptime': return NextResponse.json({ uptime: process.uptime() });

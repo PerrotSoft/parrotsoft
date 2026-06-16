@@ -2,8 +2,19 @@
 const nextConfig = {
   experimental: {
     serverActions: {
-      bodySizeLimit: '250mb',
+      bodySizeLimit: '500mb',
     },
+  },
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: [
+          { key: 'Cross-Origin-Embedder-Policy', value: 'require-corp' },
+          { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+        ],
+      },
+    ];
   },
 };
 

@@ -1,882 +1,1281 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
-import Hls from 'hls.js';
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile, toBlobURL } from '@ffmpeg/util';
-import * as actions from '../actions'; 
+import React, { useState, useEffect, useRef, Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
+import * as actions from '../actions';
+import WavyPlayer from './components/WavyPlayer';
 
-export default function WavyTubePage() {
-  const [currentUsername, setCurrentUsername] = useState('Guest');
+// ─── Shorts: умный буфер ─────────────────────────────────────────────────────
+function ShortsPlayer({ short, isActive, isNear }) {
+  const videoRef = useRef(null);
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (isActive) {
+      if (!video.src || !video.src.includes(short.id)) { video.src = `/videos/${short.id}.mp4`; video.load(); }
+      video.play().catch(() => {});
+    } else if (isNear) {
+      if (!video.src || !video.src.includes(short.id)) { video.src = `/videos/${short.id}.mp4`; video.load(); }
+      video.pause();
+    } else {
+      video.pause(); video.src = ''; video.load();
+    }
+  }, [isActive, isNear, short.id]);
+  return <video ref={videoRef} loop playsInline muted={!isActive} className="short-native-video" />;
+}
 
-  const [activeTab, setActiveTab] = useState('home'); 
-  const [videos, setVideos] = useState([]);
-  const [recommended, setRecommended] = useState([]);
-  const [activeVideo, setActiveVideo] = useState(null);
+// ─── Попап комментариев ──────────────────────────────────────────────────────
+function CommentsPopup({ video, currentChannel, onClose }) {
   const [comments, setComments] = useState([]);
   const [newComment, setNewComment] = useState('');
-  
-  const [channelStats, setChannelStats] = useState(null);
-  const [isSubscribed, setIsSubscribed] = useState(false);
-  
-  // Состояния для плеера
-  const [isBuffering, setIsBuffering] = useState(false);
-  const [isFrozen, setIsFrozen] = useState(false);
-  
-  const videoRef = useRef(null);
-  const hlsRef = useRef(null);
-  const ffmpegRef = useRef(new FFmpeg());
-  const [qualityLevels, setQualityLevels] = useState([]);
-  const [currentQuality, setCurrentQuality] = useState(-1);
-  const watchTimerRef = useRef(null);
-  const watchSecondsRef = useRef(0);
-
-  // Состояния загрузки
-  const [title, setTitle] = useState('');
-  const [description, setDescription] = useState('');
-  const [selectedFile, setSelectedFile] = useState(null);
-  const [thumbnailFile, setThumbnailFile] = useState(null);
-  const [vidSettings, setVidSettings] = useState({ likes: true, dislikes: true, recs: true });
-  
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [processStatus, setProcessStatus] = useState('');
-  const [ffmpegProgress, setFfmpegProgress] = useState(0);
-
-  const [editingVideo, setEditingVideo] = useState(null);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-
-  // Драг-н-дроп логотипа
-  const [logoPos, setLogoPos] = useState({ x: 20, y: 20 });
-  const [isDraggingLogo, setIsDraggingLogo] = useState(false);
-  const dragOffset = useRef({ x: 0, y: 0 });
-  const playerContainerRef = useRef(null);
-
+  const [loading, setLoading] = useState(true);
   useEffect(() => {
-    const savedUser = localStorage.getItem('p_user');
-    if (savedUser) setCurrentUsername(savedUser);
-    initApp();
-  }, []);
-
-  async function initApp() {
-    await actions.ensureVideoTables();
-    const vids = await actions.getAllVideos();
-    const recs = await actions.getRecommendedVideos();
-    if (vids.success) setVideos(vids.data);
-    if (recs.success) setRecommended(recs.data);
-  }
-
-  // === АВТООБНОВЛЕНИЕ РЕКОМЕНДАЦИЙ ===
-  useEffect(() => {
-    let interval;
-    if (activeTab === 'home' || activeTab === 'player') {
-      interval = setInterval(async () => {
-        const recs = await actions.getRecommendedVideos();
-        if (recs.success) setRecommended(recs.data);
-      }, 15000); 
-    }
-    return () => clearInterval(interval);
-  }, [activeTab]);
-
-  // === ПЛЕЕР И ЗАПРОС КАЧЕСТВА У СЕРВЕРА ===
-  useEffect(() => {
-    if (activeTab !== 'player') {
-      clearInterval(watchTimerRef.current);
-      return;
-    }
-    
-    const video = videoRef.current;
-    if (!video || !activeVideo) return;
-
-    loadComments();
-    checkSub(activeVideo.username);
-    setIsBuffering(false);
-    setIsFrozen(false);
-
-    const settings = activeVideo.settings ? JSON.parse(activeVideo.settings) : { likes: true, dislikes: true, recs: true };
-    activeVideo.parsedSettings = settings;
-
-    const playlistUrl = `/api/videos/${activeVideo.id}/master.m3u8`;
-
-    if (Hls.isSupported()) {
-      if (hlsRef.current) hlsRef.current.destroy();
-      
-      // Оптимизация для слабых ПК и 1ГБ ОЗУ
-      const hls = new Hls({
-        autoStartLoad: true,
-        startLevel: 0,
-        maxBufferLength: 10, // Меньше буфер, чтобы не забивать память
-        maxMaxBufferLength: 20,
-        lowLatencyMode: true,
-        enableWorker: true
-      });
-      hlsRef.current = hls;
-      
-      hls.loadSource(playlistUrl);
-      hls.attachMedia(video);
-      
-      hls.on(Hls.Events.MANIFEST_PARSED, (event, data) => {
-        setQualityLevels(data.levels);
-      });
-      hls.on(Hls.Events.LEVEL_SWITCHED, (event, data) => {
-        setCurrentQuality(data.level);
-      });
-      hls.on(Hls.Events.ERROR, (event, data) => {
-        if (data.fatal) {
-          switch (data.type) {
-            case Hls.ErrorTypes.NETWORK_ERROR:
-              setIsFrozen(true);
-              hls.startLoad();
-              break;
-            case Hls.ErrorTypes.MEDIA_ERROR:
-              hls.recoverMediaError();
-              break;
-            default:
-              hls.destroy();
-              break;
-          }
-        }
-      });
-    } else if (video.canPlayType('application/x-mpegURL')) {
-      video.src = playlistUrl;
-    }
-
-    // Точная аналитика (считаем только когда реально играет)
-    watchSecondsRef.current = 0;
-    watchTimerRef.current = setInterval(() => {
-      if (!video.paused && !video.ended && !isFrozen && !isBuffering) {
-        watchSecondsRef.current += 1;
-        if (watchSecondsRef.current % 10 === 0) {
-          actions.addWatchTime(activeVideo.id, activeVideo.channel_id, 10);
-        }
-      }
-    }, 1000);
-
-    return () => { 
-      if (hlsRef.current) hlsRef.current.destroy(); 
-      clearInterval(watchTimerRef.current);
-    };
-  }, [activeVideo, activeTab]);
-
-  const handleQualityChange = (e) => {
-    const level = Number(e.target.value);
-    if (hlsRef.current) {
-      hlsRef.current.currentLevel = level;
-      setCurrentQuality(level);
-    }
-  };
-
-  // === ЛОГИКА ПЕРЕТАСКИВАНИЯ ЛОГОТИПА ===
-  const handleLogoMouseDown = (e) => {
-    setIsDraggingLogo(true);
-    dragOffset.current = {
-      x: e.clientX - logoPos.x,
-      y: e.clientY - logoPos.y
-    };
-  };
-
-  const handleLogoMouseMove = (e) => {
-    if (!isDraggingLogo || !playerContainerRef.current) return;
-    const containerRect = playerContainerRef.current.getBoundingClientRect();
-    
-    let newX = e.clientX - dragOffset.current.x;
-    let newY = e.clientY - dragOffset.current.y;
-    
-    // Ограничиваем рамками плеера
-    newX = Math.max(10, Math.min(newX, containerRect.width - 100));
-    newY = Math.max(10, Math.min(newY, containerRect.height - 40));
-
-    setLogoPos({ x: newX, y: newY });
-  };
-
-  const handleLogoMouseUp = () => {
-    setIsDraggingLogo(false);
-  };
-
-  useEffect(() => {
-    if (isDraggingLogo) {
-      window.addEventListener('mousemove', handleLogoMouseMove);
-      window.addEventListener('mouseup', handleLogoMouseUp);
-    } else {
-      window.removeEventListener('mousemove', handleLogoMouseMove);
-      window.removeEventListener('mouseup', handleLogoMouseUp);
-    }
-    return () => {
-      window.removeEventListener('mousemove', handleLogoMouseMove);
-      window.removeEventListener('mouseup', handleLogoMouseUp);
-    };
-  }, [isDraggingLogo]);
-
-
-  // === ИНТЕРАКТИВ ===
-  const loadComments = async () => {
-    if (!activeVideo) return;
-    const res = await actions.getComments(activeVideo.id);
-    if (res.success) setComments(res.data);
-  };
-
-  const submitComment = async () => {
-    if (!newComment.trim() || currentUsername === 'Guest') return;
-    await actions.addComment(activeVideo.id, currentUsername, newComment);
-    setNewComment('');
-    loadComments();
-  };
-
-  const checkSub = async (targetUser) => {
-    if (currentUsername === 'Guest') return;
-    const res = await actions.checkSubscription(targetUser, currentUsername);
-    setIsSubscribed(res.subscribed);
-  };
-
-  const handleSubscribe = async () => {
-    if (currentUsername === 'Guest' || !activeVideo) return alert("Авторизуйтесь!");
-    const res = await actions.toggleSubscription(activeVideo.username, currentUsername);
-    if (res.success) {
-      setIsSubscribed(res.subscribed);
-      setActiveVideo(prev => ({ ...prev, subscribers: prev.subscribers + (res.subscribed ? 1 : -1) }));
-    } else {
-      alert(res.error);
-    }
-  };
-
-  const handleLike = async () => {
-    await actions.incrementLike(activeVideo.id);
-    setActiveVideo(prev => ({ ...prev, likes: prev.likes + 1 }));
-  };
-
-  const handleDislike = async () => {
-    await actions.incrementDislike(activeVideo.id);
-    setActiveVideo(prev => ({ ...prev, dislikes: prev.dislikes + 1 }));
-  };
-
-  const playVideo = async (vid) => {
-    setActiveVideo(vid);
-    setActiveTab('player');
-    await actions.incrementViews(vid.id);
-  };
-
-  const loadMyChannel = async () => {
-    setActiveTab('channel');
-    setMobileMenuOpen(false);
-    const stats = await actions.getChannelStats(currentUsername);
-    if (stats.success) setChannelStats(stats.data);
-  };
-
-  const handleDeleteVideo = async (id) => {
-    if (!confirm("Удалить видео навсегда?")) return;
-    const res = await actions.deleteVideo(id, currentUsername);
-    if (res.success) { alert("Удалено"); initApp(); } 
-    else { alert("Ошибка: " + res.error); }
-  };
-
-  const saveEditVideo = async () => {
-    if (!editingVideo) return;
-    const res = await actions.updateVideoDetails(editingVideo.id, currentUsername, editingVideo.title, editingVideo.description);
-    if (res.success) { setEditingVideo(null); initApp(); } 
-    else { alert("Ошибка: " + res.error); }
-  };
-
-  const formatTime = (seconds) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    return `${h}ч ${m}м`;
-  };
-
-  // === ЗАГРУЗКА И КОНВЕРТАЦИЯ ===
-  const handleFileUpload = async (e) => {
+    if (!video?.id) return;
+    setLoading(true);
+    actions.getComments(video.id).then(res => { setComments(res || []); setLoading(false); });
+  }, [video?.id]);
+  const submitComment = async (e) => {
     e.preventDefault();
-    if (!selectedFile) return setProcessStatus("Выберите видео!");
-    setIsProcessing(true);
-    setFfmpegProgress(0);
+    if (!newComment.trim()) return;
+    const fresh = { id: Math.random().toString(), video_id: video.id, author: currentChannel, text: newComment, timestamp: Date.now() };
+    setComments([fresh, ...comments]);
+    setNewComment('');
+    await actions.addComment(video.id, currentChannel, newComment);
+  };
+  return (
+    <div className="comments-popup-backdrop" onClick={onClose}>
+      <div className="comments-popup-panel" onClick={e => e.stopPropagation()}>
+        <div className="comments-popup-header">
+          <h3>Комментарии <span className="count-tag">{comments.length}</span></h3>
+          <button className="popup-close-btn" onClick={onClose}>✕</button>
+        </div>
+        <form onSubmit={submitComment} className="popup-comment-form">
+          <input type="text" placeholder={`Комментарий от @${currentChannel}…`} value={newComment} onChange={e => setNewComment(e.target.value)} autoFocus />
+          <button type="submit" className="popup-submit-btn">↑</button>
+        </form>
+        <div className="popup-comments-list">
+          {loading ? <div className="popup-loading">Загрузка…</div>
+          : comments.length === 0 ? <div className="popup-empty">Будьте первым!</div>
+          : comments.map(c => (
+            <div key={c.id} className="popup-comment-item">
+              <div className="popup-c-avatar">{c.author?.[0]?.toUpperCase()}</div>
+              <div className="popup-c-body">
+                <span className="popup-c-author">@{c.author}</span>
+                <p>{c.text}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
 
-    try {
-      const ffmpeg = ffmpegRef.current;
-      if (!ffmpeg.loaded) {
-        setProcessStatus("Подключение декодера...");
-        const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
-        await ffmpeg.load({
-          coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-          wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-        });
-      }
+// ─── Попап создания канала ───────────────────────────────────────────────────
+const EMOJI_ICONS = ['🎬','📺','🎵','🎮','💻','🚀','🎨','📚','🌍','⚡','🔥','💎','🎤','📡','🛸','🌙','🦋','🎯','🏆','🌊'];
 
-      ffmpeg.on('progress', ({ progress }) => setFfmpegProgress(Math.round(progress * 100)));
+function CreateChannelPopup({ accountId, accountKey, currentCount, onCreated, onClose }) {
+  const [name, setName] = useState('');
+  const [displayName, setDisplayName] = useState('');
+  const [selectedIcon, setSelectedIcon] = useState('🎬');
+  const [customImageB64, setCustomImageB64] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-      setProcessStatus("Чтение исходного файла...");
-      await ffmpeg.writeFile('input.mp4', await fetchFile(selectedFile));
-
-      // ИСПРАВЛЕНИЕ КАШИ: Принудительное транскодирование в совместимый формат!
-      setProcessStatus(`Конвертация и нарезка сегментов...`);
-      await ffmpeg.exec([
-        '-i', 'input.mp4',
-        '-c:v', 'libx264',
-        '-preset', 'ultrafast',
-        '-g', '60', 
-        '-sc_threshold', '0', 
-        '-force_key_frames', 'expr:gte(t,n_forced*4)', 
-        '-c:a', 'aac',
-        '-b:a', '128k',
-        '-hls_time', '4',
-        '-hls_playlist_type', 'vod',
-        '-hls_segment_filename', 'segment_%03d.ts',
-        '-f', 'hls',
-        'master.m3u8'
-      ]);
-
-      const fsItems = await ffmpeg.listDir('/');
-      const tsFiles = fsItems.filter(f => !f.isDir && f.name.endsWith('.ts'));
-
-      const videoId = "vid_" + Math.random().toString(36).substring(2, 15);
-      const settingsJSON = JSON.stringify(vidSettings);
-
-      await actions.createVideoRecordEx(currentUsername, videoId, title, description, 0, settingsJSON);
-
-      if (thumbnailFile) {
-        setProcessStatus("Сохранение обложки...");
-        const fd = new FormData();
-        fd.append('videoId', videoId);
-        fd.append('file', thumbnailFile);
-        await fetch('/api/videos/upload-thumbnail', { method: 'POST', body: fd });
-      }
-
-      for (let i = 0; i < tsFiles.length; i++) {
-        const filename = tsFiles[i].name; 
-        setProcessStatus(`Отправка фрагментов на сервер: ${i + 1}/${tsFiles.length}`);
-        
-        const fileData = await ffmpeg.readFile(filename);
-        const blob = new Blob([fileData.buffer], { type: 'video/MP2T' });
-        
-        const formData = new FormData();
-        formData.append('file', blob, filename);
-
-        await actions.uploadHlsFileAction(videoId, filename, formData);
-      }
-
-      setProcessStatus("Публикация успешно завершена!");
-      setTimeout(() => { 
-        setIsProcessing(false); 
-        setTitle(''); setDescription(''); setSelectedFile(null); setThumbnailFile(null);
-        loadMyChannel(); 
-        initApp(); 
-      }, 2000);
-
-    } catch (err) {
-      setProcessStatus(`Критический сбой загрузки: ${err.message}`);
-      setIsProcessing(false);
-    }
+  const handleImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => setCustomImageB64(ev.target.result);
+    reader.readAsDataURL(file);
   };
 
-  // SVG-заглушка для битых превью
-  const fallbackThumbnail = 'data:image/svg+xml;charset=UTF-8,%3Csvg width="100%25" height="100%25" xmlns="http://www.w3.org/2000/svg"%3E%3Crect width="100%25" height="100%25" fill="%23222" /%3E%3Ctext x="50%25" y="50%25" font-family="sans-serif" font-size="14" fill="%23777" text-anchor="middle" dy=".3em"%3EНет превью%3C/text%3E%3C/svg%3E';
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (!name.trim()) { setError('Введите уникальное имя канала'); return; }
+    if (currentCount >= 5) { setError('Достигнут лимит 5 каналов'); return; }
+    setLoading(true);
+    setError('');
+
+    const icon = customImageB64 || selectedIcon;
+    const res = await actions.createAccountChannel(accountId, accountKey, name.trim(), displayName.trim() || name.trim(), icon);
+
+    if (res?.error === 'name_taken') { setError('Это имя уже занято — попробуйте другое'); setLoading(false); return; }
+    if (res?.error === 'limit_reached') { setError('Лимит 5 каналов на аккаунт'); setLoading(false); return; }
+    if (res?.error === 'invalid_key') { setError('Ошибка аутентификации — перезайдите'); setLoading(false); return; }
+    if (res?.error) { setError('Ошибка: ' + res.error); setLoading(false); return; }
+
+    onCreated({ username: name.trim(), display_name: displayName.trim() || name.trim(), icon, owner_account: accountId });
+    onClose();
+  };
 
   return (
-    <div className="wt-layout">
-      <div className="wt-mobile-header">
-        <button className="hamburger" onClick={() => setMobileMenuOpen(!mobileMenuOpen)}>☰</button>
-        <div className="logo" onClick={() => setActiveTab('home')}>🌊 WavyTube</div>
-      </div>
+    <div className="comments-popup-backdrop" onClick={onClose}>
+      <div className="create-ch-popup" onClick={e => e.stopPropagation()}>
+        <div className="comments-popup-header">
+          <h3>Новый канал <span className="count-tag">{currentCount}/5</span></h3>
+          <button className="popup-close-btn" onClick={onClose}>✕</button>
+        </div>
 
-      <aside className={`wt-sidebar ${mobileMenuOpen ? 'open' : ''}`}>
-        <div className="wt-logo desktop-only" onClick={() => setActiveTab('home')}>🌊 WavyTube</div>
-        
-        <nav className="wt-nav">
-          <button className={activeTab === 'home' ? 'active' : ''} onClick={() => { setActiveTab('home'); setMobileMenuOpen(false); }}>
-            🏠 Главная
+        <form onSubmit={handleSubmit} className="create-ch-form">
+          <div className="ch-icon-section">
+            <div className="ch-icon-preview">
+              {customImageB64
+                ? <img src={customImageB64} alt="icon" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+                : <span style={{ fontSize: 36 }}>{selectedIcon}</span>
+              }
+            </div>
+            <div className="ch-icon-controls">
+              <p style={{ margin: '0 0 8px', fontSize: 13, color: 'var(--win25-text-dim)' }}>Выбери иконку или загрузи фото</p>
+              <div className="emoji-grid">
+                {EMOJI_ICONS.map(em => (
+                  <span
+                    key={em}
+                    className={`emoji-option ${selectedIcon === em && !customImageB64 ? 'selected' : ''}`}
+                    onClick={() => { setSelectedIcon(em); setCustomImageB64(''); }}
+                  >{em}</span>
+                ))}
+              </div>
+              <label className="upload-img-label">
+                <input type="file" accept="image/*" onChange={handleImageUpload} style={{ display: 'none' }} />
+                📷 Загрузить фото
+              </label>
+            </div>
+          </div>
+
+          <div className="create-ch-fields">
+            <div className="field-group">
+              <label>Отображаемое название</label>
+              <input type="text" placeholder="Мой крутой канал" value={displayName} onChange={e => setDisplayName(e.target.value)} className="upload-input" maxLength={40} />
+            </div>
+            <div className="field-group">
+              <label>Уникальное имя <span style={{ color: 'var(--win25-text-dim)' }}>(только латиница, цифры, _)</span></label>
+              <div style={{ position: 'relative' }}>
+                <span className="at-prefix">@</span>
+                <input type="text" placeholder="mychannel_123" value={name} onChange={e => setName(e.target.value.replace(/[^a-zA-Z0-9_]/g, '').toLowerCase())} className="upload-input" style={{ paddingLeft: 28 }} maxLength={30} required />
+              </div>
+            </div>
+          </div>
+
+          {error && <div className="create-ch-error">{error}</div>}
+
+          <button type="submit" className="btn-publish" disabled={loading} style={{ marginTop: 16 }}>
+            {loading ? '⏳ Создание…' : '✨ Создать канал'}
           </button>
-          <button className={activeTab === 'channel' ? 'active' : ''} onClick={loadMyChannel}>
-            👤 Мой Канал
-          </button>
-          <button className={activeTab === 'studio' ? 'active' : ''} onClick={() => { setActiveTab('studio'); setMobileMenuOpen(false); }}>
-            ⬆️ Студия (Загрузить)
-          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ─── Основной компонент ──────────────────────────────────────────────────────
+function WavyTubeContent() {
+  const searchParams = useSearchParams();
+
+  const [activeTab, setActiveTab] = useState(searchParams.get('tab') || 'home');
+  const [activeVideo, setActiveVideo] = useState(null);
+  const [selectedChannelName, setSelectedChannelName] = useState(null);
+
+  // Мобильное меню (Drawer)
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
+  // Аккаунт
+  const [accountId, setAccountId]   = useState('');
+  const [accountKey, setAccountKey] = useState('');
+
+  // Каналы
+  const [myChannels, setMyChannels]       = useState([]); 
+  const [currentChannel, setCurrentChannel] = useState(null); 
+  const [showCreateChannel, setShowCreateChannel] = useState(false);
+  const [channelsLoading, setChannelsLoading] = useState(true);
+
+  // Контент
+  const [videos, setVideos]       = useState([]);
+  const [comments, setComments]   = useState([]);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isShort, setIsShort]     = useState(false);
+  const [analyticsVideo, setAnalyticsVideo] = useState(null);
+  const [mockSegmentData, setMockSegmentData] = useState([]);
+  const [channelStats, setChannelStats] = useState({ isSubscribed: false, subscribers: 0 });
+  const [commentsPopupVideo, setCommentsPopupVideo] = useState(null);
+
+  // Upload
+  const [uploadTitle, setUploadTitle]   = useState('');
+  const [uploadDesc, setUploadDesc]     = useState('');
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [localVideoUrl, setLocalVideoUrl] = useState(null);
+  const [thumbDataUrl, setThumbDataUrl]   = useState(null);
+  const [playlists, setPlaylists]         = useState([]);
+  const [selectedPlaylist, setSelectedPlaylist] = useState('');
+  const [newPlaylistName, setNewPlaylistName]   = useState('');
+  const [isProcessing, setIsProcessing]         = useState(false);
+  const [uploadStatus, setUploadStatus]         = useState('');
+  const abortControllerRef = useRef(null);
+  const previewVideoRef    = useRef(null);
+
+  // Shorts
+  const [activeShortsIndex, setActiveShortsIndex] = useState(0);
+  const shortsRefs = useRef([]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const pUser = localStorage.getItem('p_user') || '';
+    const pToken = localStorage.getItem('p_token') || '';
+    setAccountId(pUser);
+    setAccountKey(pToken);
+    loadMyChannels(pUser, pToken);
+    loadContent();
+  }, []);
+
+  const loadMyChannels = async (accId, accKey) => {
+    if (!accId) { setChannelsLoading(false); return; }
+    setChannelsLoading(true);
+    try {
+      const list = await actions.getMyAccountChannels(accId, accKey);
+      if (Array.isArray(list)) {
+        setMyChannels(list);
+        const savedCh = localStorage.getItem(`wt_active_ch_${accId}`);
+        const found = list.find(c => c.username === savedCh);
+        if (found) {
+          setCurrentChannel(found);
+          loadPlaylists(found.username);
+        } else if (list.length > 0) {
+          setCurrentChannel(list[0]);
+          loadPlaylists(list[0].username);
+        } else {
+          setCurrentChannel(null);
+        }
+      }
+    } catch (e) { console.error('Ошибка загрузки каналов:', e); }
+    setChannelsLoading(false);
+  };
+
+  useEffect(() => {
+    if (activeTab !== 'shorts') return;
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => { if (entry.isIntersecting) setActiveShortsIndex(Number(entry.target.dataset.idx)); });
+    }, { threshold: 0.6 });
+    shortsRefs.current.forEach(el => el && observer.observe(el));
+    return () => observer.disconnect();
+  }, [activeTab, videos]);
+
+  const loadPlaylists = async (chName) => {
+    if (!chName) return;
+    const lists = await actions.getUserPlaylists(chName);
+    if (lists) setPlaylists(lists);
+  };
+
+  const loadContent = async () => {
+    try { setVideos((await actions.getVideos()) || []); } catch(e) { console.error(e); }
+  };
+
+  const switchChannel = (ch) => {
+    setCurrentChannel(ch);
+    localStorage.setItem(`wt_active_ch_${accountId}`, ch.username);
+    loadPlaylists(ch.username);
+    setMobileMenuOpen(false);
+  };
+
+  const handleChannelCreated = (newCh) => {
+    const updated = [...myChannels, newCh];
+    setMyChannels(updated);
+    switchChannel(newCh);
+  };
+
+  const handleDeleteChannel = async (ch) => {
+    if (!confirm(`Удалить канал @${ch.username}? Это удалит все его видео!`)) return;
+    const res = await actions.deleteAccountChannel(accountId, accountKey, ch.username);
+    if (res?.error === 'access_denied') { alert('Нет прав!'); return; }
+    const updated = myChannels.filter(c => c.username !== ch.username);
+    setMyChannels(updated);
+    if (currentChannel?.username === ch.username) {
+      const next = updated[0] || null;
+      setCurrentChannel(next);
+      if (next) loadPlaylists(next.username);
+    }
+  };
+
+  const playVideo = async (video) => {
+    setActiveVideo(video); setActiveTab('watch');
+    if (video.id) {
+      await actions.incrementViews(video.id);
+      const comms = await actions.getComments(video.id);
+      setComments(comms || []);
+      const stats = await actions.checkChannelState(currentChannel?.username || '', video.channel);
+      setChannelStats(stats);
+    }
+  };
+
+  const toggleLike = async (type) => {
+    if (!activeVideo || !currentChannel) return;
+    const res = await actions.toggleLike(activeVideo.id, currentChannel.username, type);
+    if (res.success) setActiveVideo(prev => ({ ...prev, likes: res.likes, dislikes: res.dislikes }));
+  };
+
+  const toggleSubscription = async () => {
+    if (!activeVideo || !currentChannel) return;
+    const res = await actions.toggleSubscription(currentChannel.username, activeVideo.channel);
+    if (res.success) setChannelStats({ isSubscribed: res.isSubbed, subscribers: res.count });
+  };
+
+  const handleVideoSelect = (e) => {
+    const file = e.target.files[0];
+    if (file) { setSelectedFile(file); setLocalVideoUrl(URL.createObjectURL(file)); setThumbDataUrl(null); }
+  };
+
+  const captureFrameFromVideo = () => {
+    const video = previewVideoRef.current;
+    if (!video) return;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+    setThumbDataUrl(canvas.toDataURL('image/jpeg', 0.6));
+  };
+
+  const handleCustomImageUpload = (e) => {
+    const file = e.target.files[0];
+    if (file) { const r = new FileReader(); r.onload = ev => setThumbDataUrl(ev.target.result); r.readAsDataURL(file); }
+  };
+
+  const handleCreatePlaylist = async () => {
+    if (!newPlaylistName.trim() || !currentChannel) return;
+    await actions.createPlaylist(newPlaylistName, currentChannel.username);
+    setNewPlaylistName('');
+    loadPlaylists(currentChannel.username);
+  };
+
+  const handleFastUpload = async (e) => {
+    e.preventDefault();
+    if (!selectedFile || !uploadTitle || !currentChannel) return;
+    const isOwner = await actions.verifyChannelOwnership(accountId, accountKey, currentChannel.username);
+    if (!isOwner) { alert('Нет прав на этот канал!'); return; }
+
+    setIsProcessing(true); setUploadStatus('Отправка на сервер…');
+    abortControllerRef.current = new AbortController();
+    const { signal } = abortControllerRef.current;
+
+    try {
+      const videoDuration = previewVideoRef.current?.duration || 0;
+      const videoId = 'v_' + Math.random().toString(36).substring(2, 14);
+      const fd = new FormData();
+      fd.append('file', selectedFile, `${videoId}.mp4`);
+      fd.append('videoId', videoId);
+      const uploadRes = await fetch('/api/upload', { method: 'POST', body: fd, signal });
+      if (!uploadRes.ok) throw new Error('Ошибка сети');
+      setUploadStatus('Сохранение метаданных…');
+      await actions.saveVideoMetadata({
+        id: videoId, channel: currentChannel.username,
+        title: uploadTitle, description: uploadDesc,
+        playlist: selectedPlaylist, thumbnail: thumbDataUrl,
+        is_short: isShort, duration: videoDuration,
+      }, { tags: '', audience_type: 'general' });
+      setUploadStatus('Опубликовано!');
+      setTimeout(() => {
+        setUploadTitle(''); setUploadDesc(''); setSelectedFile(null);
+        setLocalVideoUrl(null); setThumbDataUrl(null); setIsProcessing(false);
+        loadContent(); setActiveTab('home');
+      }, 1500);
+    } catch (err) {
+      if (err.name === 'AbortError') return;
+      alert('Сбой: ' + err.message); setIsProcessing(false);
+    }
+  };
+
+  const deleteVideo = async (id) => {
+    if (!confirm('Удалить это видео?') || !currentChannel) return;
+    const res = await actions.deleteVideoSecure(id, currentChannel.username, accountId, accountKey);
+    if (res?.error === 'access_denied') { alert('Нет прав!'); return; }
+    loadContent();
+  };
+
+  const openDeepAnalytics = async (video) => {
+    setAnalyticsVideo(video);
+    const dbStats = await actions.getVideoAnalytics(video.id);
+    if (dbStats?.length > 0) {
+      setMockSegmentData(dbStats.map(s => ({ segment: `${s.segment_index}`, views: s.watch_count })));
+    } else {
+      setMockSegmentData(Array.from({ length: 20 }, (_, i) => ({ segment: `${i+1}`, views: Math.floor(Math.random() * (video.views || 100)) })));
+    }
+  };
+
+  const playlistsGroup = videos.filter(v => !v.is_short).reduce((acc, v) => {
+    const pl = v.playlist || 'Общее';
+    if (!acc[pl]) acc[pl] = [];
+    acc[pl].push(v);
+    return acc;
+  }, {});
+
+  const filteredVideos = videos.filter(v =>
+    v.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    v.playlist?.toLowerCase().includes(searchQuery.toLowerCase())
+  );
+
+  const shortsList = videos.filter(v => v.is_short || v.playlist === 'Shorts');
+
+  const chIcon = (ch) => {
+    if (!ch) return '?';
+    if (ch.icon && ch.icon.startsWith('data:')) return <img src={ch.icon} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />;
+    if (ch.icon && ch.icon.length <= 4) return ch.icon; 
+    return (ch.display_name || ch.username || '?')[0].toUpperCase();
+  };
+
+  const noAccount = !accountId;
+
+  return (
+    <div className="wavy-app">
+      {commentsPopupVideo && (
+        <CommentsPopup video={commentsPopupVideo} currentChannel={currentChannel?.username || 'guest'} onClose={() => setCommentsPopupVideo(null)} />
+      )}
+
+      {showCreateChannel && (
+        <CreateChannelPopup accountId={accountId} accountKey={accountKey} currentCount={myChannels.length} onCreated={handleChannelCreated} onClose={() => setShowCreateChannel(false)} />
+      )}
+
+      {mobileMenuOpen && <div className="mobile-backdrop" onClick={() => setMobileMenuOpen(false)}></div>}
+
+      {/* ── Сайдбар ── */}
+      <aside className={`wavy-sidebar ${mobileMenuOpen ? 'open' : ''}`}>
+        <div className="sidebar-header-row">
+          <div className="brand" onClick={() => { setActiveTab('home'); setActiveVideo(null); setMobileMenuOpen(false); }}>
+            <h2>WavyTube <span>v18</span></h2>
+          </div>
+          <button className="mobile-close-btn" onClick={() => setMobileMenuOpen(false)}>✕</button>
+        </div>
+
+        <nav className="nav-menu desktop-only">
+          {['home','shorts','studio','upload'].map(tab => (
+            <button key={tab} className={activeTab === tab ? 'active' : ''} onClick={() => { setActiveTab(tab); setActiveVideo(null); }}>
+              <span className="icon">{tab==='home'?'🏠':tab==='shorts'?'⚡':tab==='studio'?'📊':'📤'}</span>
+              {tab==='home'?'Главная':tab==='shorts'?'Wavy Shorts':tab==='studio'?'Студия':'Загрузить'}
+            </button>
+          ))}
         </nav>
 
-        <div className="wt-user-badge">
-          <div className="avatar">{currentUsername?.[0]?.toUpperCase() || 'U'}</div>
-          <div className="info">
-            <span className="name">{currentUsername}</span>
-            <span className="role">ParrotSoft ID</span>
+        {/* ── Менеджер каналов ── */}
+        <div className="channels-manager">
+          <div className="channels-manager-header">
+            <h3>Мои каналы</h3>
+            {!noAccount && <span className="ch-count">{myChannels.length}/5</span>}
           </div>
+
+          {noAccount ? (
+            <div className="ch-no-account"><span style={{ fontSize: 28 }}>🔐</span><p>Войдите в аккаунт, чтобы управлять каналами</p></div>
+          ) : channelsLoading ? (
+            <div className="ch-loading"><div className="upload-spinner" /><p>Загрузка…</p></div>
+          ) : (
+            <>
+              <div className="channels-list">
+                {myChannels.length === 0 ? (
+                  <div className="ch-empty-hint">
+                    <span style={{ fontSize: 32 }}>🎬</span><p>У тебя пока нет каналов</p>
+                  </div>
+                ) : (
+                  myChannels.map(ch => (
+                    <div key={ch.username} className={`channel-pill ${currentChannel?.username === ch.username ? 'current' : ''}`} onClick={() => switchChannel(ch)}>
+                      <div className="avatar-mini ch-icon-wrap">{chIcon(ch)}</div>
+                      <div className="ch-text">
+                        <span className="ch-name">{ch.display_name || ch.username}</span>
+                        <span className="ch-handle">@{ch.username}</span>
+                      </div>
+                      {currentChannel?.username === ch.username && <span className="active-dot" />}
+                      <button className="ch-delete-btn" onClick={e => { e.stopPropagation(); handleDeleteChannel(ch); }}>✕</button>
+                    </div>
+                  ))
+                )}
+              </div>
+              {myChannels.length < 5 && (
+                <button className="add-channel-btn" onClick={() => setShowCreateChannel(true)}><span>+</span> Создать канал</button>
+              )}
+            </>
+          )}
+        </div>
+
+        <div className="account-badge">
+          <div className="status-indicator online" />
+          <span className="account-id-label">Аккаунт <strong>#{accountId || '?'}</strong></span>
         </div>
       </aside>
 
-      <main className="wt-main">
-        {activeTab === 'home' && (
-          <div className="home-grid">
-            <h2 className="page-title">Рекомендации для вас</h2>
-            {recommended.length === 0 ? (
-              <p className="empty-state">Видео не обнаружены. Будьте первыми!</p>
-            ) : (
-              <div className="video-grid">
-                {recommended.map(vid => (
-                  <div key={vid.id} className="video-card" onClick={() => playVideo(vid)}>
-                    <div className="thumb-wrapper">
-                      <img 
-                        src={`/api/videos/${vid.id}/thumbnail`} 
-                        alt="thumb" 
-                        onError={(e) => { e.target.onerror = null; e.target.src = fallbackThumbnail; }} 
-                      />
-                      <span className="duration">HLS HD</span>
-                    </div>
-                    <div className="info">
-                      <div className="channel-av">{vid.username?.[0]?.toUpperCase() || 'U'}</div>
-                      <div className="text-data">
-                        <h3>{vid.title}</h3>
-                        <span className="meta">{vid.channel_name} • {vid.views} просмотров</span>
+      {/* ── Основная область ── */}
+      <main className="wavy-main-content">
+        <header className="wavy-header">
+          <button className="mobile-menu-btn" onClick={() => setMobileMenuOpen(true)}>☰</button>
+          <div className="mobile-brand" onClick={() => setActiveTab('home')}>Wavy</div>
+
+          <div className="search-box">
+            <input type="text" placeholder="Поиск видео…" value={searchQuery} onChange={e => setSearchQuery(e.target.value)} />
+            {searchQuery && <button onClick={() => setSearchQuery('')} className="clear-search">×</button>}
+          </div>
+
+          <div className="user-profile-badge">
+            <div className="avatar-mini ch-icon-wrap" style={{ width: 32, height: 32, flexShrink: 0 }}>
+              {currentChannel ? chIcon(currentChannel) : '?'}
+            </div>
+            <span className="desktop-only-text">{currentChannel ? (currentChannel.display_name || currentChannel.username) : '—'}</span>
+          </div>
+        </header>
+
+        <div className="tab-container">
+
+          {!channelsLoading && !noAccount && !currentChannel && activeTab !== 'home' && (
+            <div className="empty-state">
+              <span style={{ fontSize: 50 }}>🎬</span>
+              <p style={{ fontSize: 18, color: '#ddd' }}>Сначала создайте канал</p>
+              <button className="cta-upload-btn" onClick={() => setShowCreateChannel(true)}>+ Создать канал</button>
+            </div>
+          )}
+
+          {/* ── Watch ── */}
+          {activeTab === 'watch' && activeVideo && (
+            <div className="watch-layout">
+              <div className="video-player-frame">
+                <WavyPlayer videoId={activeVideo.id} duration={activeVideo.duration} />
+              </div>
+              <div className="video-details-card">
+                <div className="details-header">
+                  <h1>{activeVideo.title}</h1>
+                  <div className="action-buttons">
+                    <button className="like-btn" onClick={() => toggleLike('like')}>👍 {activeVideo.likes || 0}</button>
+                    <button className="like-btn" onClick={() => toggleLike('dislike')}>👎 {activeVideo.dislikes || 0}</button>
+                    <span className="views-count">👁 {activeVideo.views || 0}</span>
+                  </div>
+                </div>
+                <div className="playlist-link-node">
+                  📁 <strong style={{ cursor:'pointer', color:'#0078d4' }} onClick={() => { setSearchQuery(activeVideo.playlist); setActiveTab('home'); }}>{activeVideo.playlist || 'Общее'}</strong>
+                </div>
+                <div className="channel-author-row" onClick={() => { setSelectedChannelName(activeVideo.channel); setActiveTab('channel-view'); }}>
+                  <div className="author-avatar">{activeVideo.channel?.[0]}</div>
+                  <div style={{ flex: 1 }}>
+                    <h3>{activeVideo.channel}</h3>
+                    <p>{channelStats.subscribers} подписчиков</p>
+                  </div>
+                  {currentChannel?.username !== activeVideo.channel && (
+                    <button className="subscribe-action-btn" onClick={e => { e.stopPropagation(); toggleSubscription(); }}>
+                      {channelStats.isSubscribed ? 'Отписаться' : 'Подписаться'}
+                    </button>
+                  )}
+                </div>
+                <div className="video-description-box"><p>{activeVideo.description || 'Описание отсутствует.'}</p></div>
+                <button className="open-comments-btn" onClick={() => setCommentsPopupVideo(activeVideo)}>
+                  💬 Комментарии ({comments.length})
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Home ── */}
+          {activeTab === 'home' && (
+            <div className="home-layout">
+              {searchQuery && <div className="search-results-title">Поиск: «{searchQuery}»</div>}
+              {Object.keys(playlistsGroup).length === 0 ? (
+                <div className="empty-state">
+                  <span style={{ fontSize: 40 }}>📭</span>
+                  <p>Видео ещё нет.</p>
+                  {currentChannel && <button onClick={() => setActiveTab('upload')} className="cta-upload-btn">Загрузить видео</button>}
+                </div>
+              ) : (
+                Object.keys(playlistsGroup).map(plName => {
+                  const pvs = playlistsGroup[plName].filter(v => filteredVideos.some(fv => fv.id === v.id));
+                  if (pvs.length === 0) return null;
+                  return (
+                    <section key={plName} className="playlist-section">
+                      <div className="playlist-header">
+                        <h2>📁 {plName}</h2>
+                        <span className="count-tag">{pvs.length} видео</span>
                       </div>
+                      <div className="videos-compact-grid">
+                        {pvs.map(video => (
+                          <div key={video.id} className="wavy-video-card" onClick={() => playVideo(video)}>
+                            <div className="thumbnail-wrapper">
+                              {video.thumbnail ? <img src={video.thumbnail} alt={video.title} /> : <video src={`/videos/${video.id}.mp4`} preload="metadata" muted playsInline />}
+                              <span className="duration-tag">{video.is_short ? '⚡ Short' : 'HD'}</span>
+                            </div>
+                            <div className="card-info">
+                              <h3>{video.title}</h3>
+                              <p className="card-channel">@{video.channel}</p>
+                              <div className="card-stats"><span>👁 {video.views||0}</span><span>•</span><span>👍 {video.likes||0}</span></div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  );
+                })
+              )}
+            </div>
+          )}
+
+          {/* ── Shorts ── */}
+          {activeTab === 'shorts' && (
+            <div className="shorts-container-scroll">
+              {shortsList.length === 0
+                ? <div className="empty-state"><span style={{fontSize:40}}>⚡</span><p>Нет коротких видео.</p></div>
+                : shortsList.map((short, idx) => {
+                    const isActive = idx === activeShortsIndex;
+                    const isNear   = Math.abs(idx - activeShortsIndex) === 1;
+                    return (
+                      <div key={short.id} className="short-vertical-slide" data-idx={idx} ref={el => (shortsRefs.current[idx] = el)}>
+                        <div className="short-player-wrapper">
+                          <ShortsPlayer short={short} isActive={isActive} isNear={isNear} />
+                          <div className="short-overlay-details">
+                            <div className="short-channel-row">
+                              <div className="short-avatar">{short.channel?.[0]?.toUpperCase()}</div>
+                              <div>
+                                <div className="short-channel-name">@{short.channel}</div>
+                                <div className="short-title">{short.title}</div>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="short-side-actions">
+                            <button className="short-action-btn"><span>❤️</span><span>{short.likes||0}</span></button>
+                            <button className="short-action-btn"><span>👁️</span><span>{short.views||0}</span></button>
+                            <button className="short-action-btn" onClick={() => setCommentsPopupVideo(short)}><span>💬</span><span>Чат</span></button>
+                            <button className="short-action-btn" onClick={() => { setActiveVideo(short); setActiveTab('watch'); }}><span>▶️</span><span>Full</span></button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })
+              }
+            </div>
+          )}
+
+          {/* ── Студия ── */}
+          {activeTab === 'studio' && (
+            <div className="studio-layout">
+              <div className="studio-top-bar">
+                <div>
+                  <h2>Творческая Студия</h2>
+                  {currentChannel
+                    ? <p className="studio-subtitle">Канал: <strong>{currentChannel.display_name || currentChannel.username}</strong></p>
+                    : <p className="studio-subtitle" style={{color:'#e84545'}}>Выберите канал в боковом меню</p>
+                  }
+                </div>
+              </div>
+
+              {myChannels.length > 1 && (
+                <div className="studio-ch-tabs">
+                  {myChannels.map(ch => (
+                    <button key={ch.username} className={`studio-ch-tab ${currentChannel?.username === ch.username ? 'active' : ''}`} onClick={() => switchChannel(ch)}>
+                      <div className="avatar-mini ch-icon-wrap" style={{width:20,height:20,fontSize:12}}>{chIcon(ch)}</div>
+                      {ch.display_name || ch.username}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="studio-table-wrapper">
+                <table className="studio-table">
+                  <thead>
+                    <tr><th>Видео</th><th className="desktop-td">Плейлист</th><th>Статистика</th><th>Опции</th></tr>
+                  </thead>
+                  <tbody>
+                    {!currentChannel
+                      ? <tr><td colSpan={4} style={{textAlign:'center',padding:'40px',color:'#666'}}>Выберите канал</td></tr>
+                      : videos.filter(v => v.channel === currentChannel.username).length === 0
+                        ? <tr><td colSpan={4} style={{textAlign:'center',padding:'40px',color:'#666'}}>На этом канале пока нет видео</td></tr>
+                        : videos.filter(v => v.channel === currentChannel.username).map(video => (
+                            <tr key={video.id}>
+                              <td>
+                                <div className="studio-title-cell">
+                                  {video.thumbnail && <img src={video.thumbnail} alt="" className="studio-thumb" />}
+                                  <div>
+                                    <strong>{video.title}</strong>
+                                    <div className="mobile-only-text" style={{fontSize:11, color:'#888', marginTop:4}}>{video.is_short ? '⚡ Short' : '📺 Видео'}</div>
+                                  </div>
+                                </div>
+                              </td>
+                              <td className="desktop-td"><span className="playlist-badge">{video.playlist || 'Общее'}</span></td>
+                              <td>👁 {video.views || 0}</td>
+                              <td className="actions-cell">
+                                <button onClick={() => openDeepAnalytics(video)} className="btn-analytics">📈</button>
+                                <button onClick={() => deleteVideo(video.id)} className="btn-delete">🗑</button>
+                              </td>
+                            </tr>
+                          ))
+                    }
+                  </tbody>
+                </table>
+              </div>
+
+              {analyticsVideo && (
+                <div className="analytics-modal-box-acrylic">
+                  <div className="modal-header">
+                    <div>
+                      <h3>Аналитика: {analyticsVideo.title}</h3>
+                    </div>
+                    <button onClick={() => setAnalyticsVideo(null)} className="close-modal">✕</button>
+                  </div>
+                  <h4 style={{margin:'20px 0 10px',fontSize:14,color:'#aaa'}}>Удержание по сегментам</h4>
+                  <div className="chart-timeline-container">
+                    {mockSegmentData.map((pt, idx) => (
+                      <div key={idx} className="chart-bar-node" title={`Просмотры: ${pt.views}`}>
+                        <div className="bar-label-tag">{pt.views}</div>
+                        <div className="bar-fill-indicator" style={{height:`${Math.max(5,(pt.views/200)*100)}%`}} />
+                        <div className="bar-label-tag">{idx+1}</div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── Channel View ── */}
+          {activeTab === 'channel-view' && selectedChannelName && (
+            <div className="channel-page-layout">
+              <div className="channel-banner-acrylic">
+                <div className="channel-profile-avatar-big">{selectedChannelName[0]}</div>
+                <div className="channel-profile-meta-big">
+                  <h2>{selectedChannelName}</h2>
+                  <p style={{color:'#888',margin:'4px 0 0'}}>{videos.filter(v=>v.channel===selectedChannelName).length} видео</p>
+                </div>
+              </div>
+              <div className="channel-tab-title">Видео автора</div>
+              <div className="videos-compact-grid">
+                {videos.filter(v=>v.channel===selectedChannelName).map(video=>(
+                  <div key={video.id} className="wavy-video-card" onClick={()=>playVideo(video)}>
+                    <div className="thumbnail-wrapper">
+                      {video.thumbnail ? <img src={video.thumbnail} alt={video.title}/> : <video src={`/videos/${video.id}.mp4`} preload="metadata" muted playsInline/>}
+                    </div>
+                    <div className="card-info">
+                      <h3>{video.title}</h3>
+                      <div className="card-stats"><span>👁 {video.views||0} просмотров</span></div>
                     </div>
                   </div>
                 ))}
               </div>
-            )}
-          </div>
-        )}
-
-        {activeTab === 'player' && activeVideo && (
-          <div className="player-layout">
-            <div className="player-primary">
-              <div className="video-wrapper" ref={playerContainerRef}>
-                <video 
-                  ref={videoRef} 
-                  controls 
-                  autoPlay 
-                  className="main-video"
-                  onWaiting={() => { setIsBuffering(true); setIsFrozen(true); }}
-                  onPlaying={() => { setIsBuffering(false); setIsFrozen(false); }}
-                  onPause={() => { setIsBuffering(false); setIsFrozen(false); }}
-                  onStalled={() => setIsFrozen(true)}
-                />
-                
-                {/* Индикатор зависания видео */}
-                {(isBuffering || isFrozen) && (
-                  <div className="buffering-overlay">
-                    <div className="spinner"></div>
-                    <span className="freeze-text">Видео зависло (Ожидание данных...)</span>
-                  </div>
-                )}
-
-                {/* Перетаскиваемый логотип WavyTube */}
-                <div 
-                  className="draggable-logo"
-                  style={{ left: logoPos.x, top: logoPos.y, cursor: isDraggingLogo ? 'grabbing' : 'grab' }}
-                  onMouseDown={handleLogoMouseDown}
-                  title="Удерживайте, чтобы переместить"
-                >
-                  🌊 WavyTube
-                </div>
-
-                <div className="quality-selector">
-                  <select value={currentQuality} onChange={handleQualityChange}>
-                    <option value={-1}>Авто</option>
-                    {qualityLevels.map((lvl, i) => (
-                      <option key={i} value={i}>{lvl.height}p</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              
-              <div className="video-details">
-                <h1 className="title">{activeVideo.title}</h1>
-                <div className="action-row">
-                  <div className="author">
-                    <div className="channel-av">{activeVideo.username?.[0]?.toUpperCase() || 'U'}</div>
-                    <div className="author-text">
-                      <strong>{activeVideo.channel_name}</strong>
-                      <div className="subscribers">{activeVideo.subscribers} подписчиков</div>
-                    </div>
-                    {currentUsername !== activeVideo.username && (
-                      <button className={`btn-subscribe ${isSubscribed ? 'active' : ''}`} onClick={handleSubscribe}>
-                        {isSubscribed ? 'Вы подписаны' : 'Подписаться'}
-                      </button>
-                    )}
-                  </div>
-                  
-                  <div className="actions">
-                    <div className="action-group">
-                      {activeVideo.parsedSettings?.likes && (
-                        <button className="btn-action left" onClick={handleLike}>👍 {activeVideo.likes}</button>
-                      )}
-                      {activeVideo.parsedSettings?.dislikes && (
-                        <button className="btn-action right" onClick={handleDislike}>👎</button>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="description-box">
-                  <span className="views-bold">{activeVideo.views} просмотров • Траст: {activeVideo.trust_rating}%</span>
-                  <p>{activeVideo.description || "Описание отсутствует."}</p>
-                </div>
-              </div>
-
-              <div className="comments-section">
-                <h3>Комментарии ({comments.length})</h3>
-                <div className="comment-input">
-                  <div className="channel-av small">{currentUsername?.[0]?.toUpperCase() || 'U'}</div>
-                  <input 
-                    type="text" 
-                    placeholder="Оставьте ваш комментарий..."
-                    value={newComment}
-                    onChange={e => setNewComment(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && submitComment()}
-                  />
-                  <button onClick={submitComment}>Отправить</button>
-                </div>
-                
-                <div className="comments-list">
-                  {comments.map(c => (
-                    <div key={c.id} className="comment">
-                      <div className="channel-av small">{c.username?.[0]?.toUpperCase() || 'U'}</div>
-                      <div className="content">
-                        <span className="author">@{c.username} <span className="date">{new Date(c.created_at).toLocaleDateString()}</span></span>
-                        <p>{c.text}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
             </div>
+          )}
 
-            {activeVideo.parsedSettings?.recs && (
-              <div className="player-secondary">
-                <h3>Следующее видео</h3>
-                <div className="recs-list">
-                  {recommended.filter(v => v.id !== activeVideo.id).slice(0, 8).map(vid => (
-                    <div key={vid.id} className="rec-card" onClick={() => playVideo(vid)}>
-                      <img 
-                        src={`/api/videos/${vid.id}/thumbnail`} 
-                        alt="thumb" 
-                        onError={(e) => { e.target.onerror = null; e.target.src = fallbackThumbnail; }} 
-                      />
-                      <div className="info">
-                        <h4>{vid.title}</h4>
-                        <span>{vid.channel_name}</span>
-                        <span>{vid.views} просм.</span>
-                      </div>
-                    </div>
-                  ))}
+          {/* ── Upload ── */}
+          {activeTab === 'upload' && (
+            <div className="upload-layout-box">
+              <h2>Загрузка видео</h2>
+              {!currentChannel ? (
+                <div className="empty-state">
+                  <span style={{fontSize:40}}>🎬</span>
+                  <p>Сначала создайте канал</p>
+                  <button className="cta-upload-btn" onClick={()=>setShowCreateChannel(true)}>+ Создать канал</button>
                 </div>
-              </div>
-            )}
-          </div>
-        )}
-
-        {activeTab === 'channel' && (
-          <div className="channel-dashboard">
-            <div className="channel-banner">
-              <div className="channel-av huge">{currentUsername?.[0]?.toUpperCase() || 'U'}</div>
-              <div className="channel-info-header">
-                <h2>{currentUsername}</h2>
-                <p>@{currentUsername} • Панель управления канала</p>
-                <div className="stats-badges">
-                  <span>👥 {channelStats?.subscribers || 0} Подписчиков</span>
-                  <span>⏱️ {formatTime(channelStats?.total_watch_time || 0)} Время просмотров</span>
-                </div>
-              </div>
-            </div>
-
-            <h3 style={{marginTop: '30px', marginBottom: '15px'}}>Менеджер видеоконтента</h3>
-            <div className="video-table-wrapper">
-              <table className="video-table">
-                <thead>
-                  <tr>
-                    <th>Превью</th>
-                    <th>Метаданные</th>
-                    <th className="hide-mobile">Метрика</th>
-                    <th>Действия</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {videos.filter(v => v.username === currentUsername).map(vid => (
-                    <tr key={vid.id}>
-                      <td width="120px">
-                        <img 
-                          src={`/api/videos/${vid.id}/thumbnail`} 
-                          alt="thumb" 
-                          className="table-thumb" 
-                          onError={(e) => { e.target.onerror = null; e.target.src = fallbackThumbnail; }} 
-                        />
-                      </td>
-                      <td>
-                        {editingVideo?.id === vid.id ? (
-                          <div className="edit-form">
-                            <input type="text" value={editingVideo.title} onChange={e => setEditingVideo({...editingVideo, title: e.target.value})} />
-                            <textarea value={editingVideo.description} onChange={e => setEditingVideo({...editingVideo, description: e.target.value})} />
-                            <div className="edit-actions">
-                              <button className="btn-save" onClick={saveEditVideo}>Сохранить</button>
-                              <button className="btn-cancel" onClick={() => setEditingVideo(null)}>Отмена</button>
-                            </div>
+              ) : (
+                <>
+                  <p style={{color:'#888',marginTop:'-8px',marginBottom:'24px',fontSize:14}}>
+                    Канал: <strong style={{color:'#fff'}}>{currentChannel.display_name||currentChannel.username}</strong>
+                  </p>
+                  <form onSubmit={handleFastUpload} className="wavy-upload-form">
+                    <div className="upload-grid">
+                      <div className="upload-left">
+                        <label className="upload-file-zone">
+                          <input type="file" accept="video/*" onChange={handleVideoSelect} required />
+                          {selectedFile ? <span style={{color:'#0078d4'}}>✓ {selectedFile.name}</span> : <span>📁 Выбрать видеофайл</span>}
+                        </label>
+                        <input type="text" placeholder="Название видеоролика" value={uploadTitle} onChange={e=>setUploadTitle(e.target.value)} required className="upload-input" />
+                        <textarea placeholder="Описание" value={uploadDesc} onChange={e=>setUploadDesc(e.target.value)} rows={4} className="upload-input upload-textarea" />
+                        <div className="upload-playlist-block">
+                          <label style={{fontSize:12,color:'#aaa',display:'block',marginBottom:8}}>Плейлист</label>
+                          <select value={selectedPlaylist} onChange={e=>setSelectedPlaylist(e.target.value)} className="upload-select">
+                            <option value="">— Без плейлиста —</option>
+                            {playlists.map(pl=><option key={pl.id} value={pl.name}>{pl.name}</option>)}
+                          </select>
+                          <div className="upload-playlist-create">
+                            <input type="text" placeholder="Создать новый…" value={newPlaylistName} onChange={e=>setNewPlaylistName(e.target.value)} className="upload-input" style={{marginTop:0}} />
+                            <button type="button" onClick={handleCreatePlaylist} className="btn-create-playlist">+</button>
                           </div>
-                        ) : (
+                        </div>
+                        <label className="short-toggle">
+                          <input type="checkbox" checked={isShort} onChange={e=>setIsShort(e.target.checked)} />
+                          <span>⚡ Формат Short</span>
+                        </label>
+                      </div>
+                      <div className="upload-right">
+                        <h3 style={{margin:'0 0 12px',fontSize:14,color:'#aaa'}}>Обложка</h3>
+                        {localVideoUrl ? (
                           <>
-                            <strong className="td-title">{vid.title}</strong>
-                            <p className="desc-preview hide-mobile">{vid.description}</p>
+                            <video ref={previewVideoRef} src={localVideoUrl} controls className="upload-preview-video" />
+                            <button type="button" onClick={captureFrameFromVideo} className="btn-capture-frame">📸 Кадр как обложка</button>
                           </>
+                        ) : <div className="upload-video-placeholder">Выберите видео</div>}
+                        <div className="upload-divider">или загрузите изображение</div>
+                        <input type="file" accept="image/*" onChange={handleCustomImageUpload} className="upload-image-input" />
+                        {thumbDataUrl && (
+                          <div style={{marginTop:12}}>
+                            <img src={thumbDataUrl} alt="Preview" style={{width:'100%',aspectRatio:'16/9',objectFit:'cover',borderRadius:8,border:'2px solid #0078d4'}} />
+                          </div>
                         )}
-                      </td>
-                      <td className="hide-mobile">
-                        <div className="stat-line">👁️ {vid.views} просмотров</div>
-                        <div className="stat-line">👍 {vid.likes} лайков</div>
-                      </td>
-                      <td className="actions-col">
-                        <button className="btn-edit" onClick={() => setEditingVideo(vid)}>✏️</button>
-                        <button className="btn-del" onClick={() => handleDeleteVideo(vid.id)}>🗑️</button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-
-        {activeTab === 'studio' && (
-          <div className="studio-layout">
-            <div className="upload-card">
-              <h2 className="page-title">Студия публикации</h2>
-              <form onSubmit={handleFileUpload} className="studio-form">
-                
-                <div className="form-row">
-                  <div className="input-group">
-                    <label>Название видео</label>
-                    <input type="text" required value={title} onChange={e => setTitle(e.target.value)} disabled={isProcessing} />
-                  </div>
-                  <div className="input-group">
-                    <label>Описание</label>
-                    <textarea rows="3" value={description} onChange={e => setDescription(e.target.value)} disabled={isProcessing}></textarea>
-                  </div>
-                </div>
-
-                <div className="form-row media-inputs">
-                  <div className="input-group file-drop">
-                    <label>Файл видео (.mp4, .mkv)</label>
-                    <input type="file" accept="video/*" required onChange={e => setSelectedFile(e.target.files[0])} disabled={isProcessing} />
-                  </div>
-                  <div className="input-group file-drop">
-                    <label>Обложка видео (.png, .jpg)</label>
-                    <input type="file" accept="image/*" onChange={e => setThumbnailFile(e.target.files[0])} disabled={isProcessing} />
-                  </div>
-                </div>
-
-                <div className="privacy-settings">
-                  <label><input type="checkbox" checked={vidSettings.likes} onChange={e => setVidSettings({...vidSettings, likes: e.target.checked})} disabled={isProcessing} /> Разрешить лайки</label>
-                  <label><input type="checkbox" checked={vidSettings.dislikes} onChange={e => setVidSettings({...vidSettings, dislikes: e.target.checked})} disabled={isProcessing} /> Разрешить дизлайки</label>
-                  <label><input type="checkbox" checked={vidSettings.recs} onChange={e => setVidSettings({...vidSettings, recs: e.target.checked})} disabled={isProcessing} /> Включить в рекомендации</label>
-                </div>
-
-                <button type="submit" disabled={isProcessing} className="btn-upload-run">
-                  {isProcessing ? 'Обработка и выгрузка...' : 'Опубликовать'}
-                </button>
-              </form>
-
-              {isProcessing && (
-                <div className="processing-status">
-                  <div className="status-text">{processStatus}</div>
-                  <div className="progress-bar"><div className="fill" style={{width: `${ffmpegProgress}%`}}></div></div>
-                  <span>{ffmpegProgress}%</span>
-                </div>
+                      </div>
+                    </div>
+                    {isProcessing
+                      ? <div className="upload-processing"><div className="upload-spinner"/><p>{uploadStatus}</p><button type="button" onClick={()=>{abortControllerRef.current?.abort();setIsProcessing(false);}} className="btn-cancel-upload">Отменить</button></div>
+                      : <button type="submit" className="btn-publish">🚀 Опубликовать</button>
+                    }
+                  </form>
+                </>
               )}
             </div>
-          </div>
-        )}
+          )}
+
+        </div>
       </main>
 
-      <style jsx>{`
-        .wt-layout { display: flex; height: 100vh; background: #0f0f0f; color: #f1f1f1; font-family: sans-serif; overflow: hidden; flex-direction: row; }
-        .wt-mobile-header { display: none; background: #0f0f0f; padding: 15px; border-bottom: 1px solid #272727; align-items: center; justify-content: space-between; width: 100%; z-index: 100; }
-        .hamburger { background: none; border: none; color: #fff; font-size: 24px; cursor: pointer; }
-        .wt-sidebar { width: 240px; background: #0f0f0f; display: flex; flex-direction: column; border-right: 1px solid #272727; transition: transform 0.3s ease; }
-        .wt-logo { padding: 20px; font-size: 22px; font-weight: 900; color: #fff; cursor: pointer; }
-        .wt-nav { flex: 1; display: flex; flex-direction: column; padding: 10px; gap: 5px; }
-        .wt-nav button { background: transparent; color: #aaa; border: none; padding: 12px 15px; text-align: left; border-radius: 8px; font-size: 15px; cursor: pointer; font-weight: 500; transition: 0.2s; }
-        .wt-nav button:hover, .wt-nav button.active { background: #272727; color: #fff; }
-        .wt-user-badge { padding: 20px; border-top: 1px solid #272727; display: flex; align-items: center; gap: 12px; }
-        .avatar, .channel-av { width: 40px; height: 40px; background: #3ea6ff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; color: #000; flex-shrink: 0; }
-        .channel-av.small { width: 32px; height: 32px; font-size: 14px; }
-        .channel-av.huge { width: 80px; height: 80px; font-size: 32px; }
-        .wt-user-badge .info { display: flex; flex-direction: column; }
-        .wt-user-badge .name { font-weight: bold; font-size: 14px; }
-        .wt-user-badge .role { font-size: 11px; color: #aaa; }
-        .wt-main { flex: 1; overflow-y: auto; padding: 24px; background: #0f0f0f; }
-        
-        .video-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 20px; }
-        .video-card { cursor: pointer; transition: transform 0.2s; }
-        .video-card:hover { transform: scale(1.02); }
-        .thumb-wrapper { position: relative; width: 100%; aspect-ratio: 16/9; background: #222; border-radius: 12px; overflow: hidden; margin-bottom: 12px; }
-        .thumb-wrapper img { width: 100%; height: 100%; object-fit: cover; }
-        .duration { position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.8); padding: 3px 6px; border-radius: 4px; font-size: 12px; }
-        .video-card .info { display: flex; gap: 12px; }
-        .text-data h3 { margin: 0 0 6px 0; font-size: 15px; font-weight: 500; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-        .text-data .meta { color: #aaa; font-size: 13px; }
-        
-        /* PLAYER UX IMPROVEMENTS */
-        .player-layout { display: flex; gap: 24px; flex-wrap: wrap; }
-        .player-primary { flex: 1; min-width: 60%; }
-        .player-secondary { width: 360px; }
-        
-        .video-wrapper { 
-          position: relative; 
-          width: 100%; 
-          background: #000; 
-          border-radius: 16px; 
-          overflow: hidden; 
-          aspect-ratio: 16/9; 
-          margin-bottom: 15px; 
-          box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-        .main-video { width: 100%; height: 100%; display: block; outline: none; object-fit: contain; z-index: 1; }
-        
-        /* Логотип поверх видео */
-        .draggable-logo {
-          position: absolute;
-          background: rgba(0, 0, 0, 0.6);
-          color: rgba(255, 255, 255, 0.8);
-          padding: 6px 12px;
-          border-radius: 8px;
-          font-weight: bold;
-          font-size: 14px;
-          z-index: 50;
-          user-select: none;
-          backdrop-filter: blur(4px);
-          border: 1px solid rgba(255,255,255,0.1);
-          box-shadow: 0 2px 10px rgba(0,0,0,0.5);
+      {/* ── Нижняя мобильная панель навигации (YouTube Style) ── */}
+      <nav className="mobile-bottom-nav">
+        <button className={`m-nav-item ${activeTab === 'home' ? 'active' : ''}`} onClick={() => { setActiveTab('home'); setActiveVideo(null); }}>
+          <span className="m-icon">🏠</span><span className="m-label">Главная</span>
+        </button>
+        <button className={`m-nav-item ${activeTab === 'shorts' ? 'active' : ''}`} onClick={() => { setActiveTab('shorts'); setActiveVideo(null); }}>
+          <span className="m-icon">⚡</span><span className="m-label">Shorts</span>
+        </button>
+        <button className="m-nav-item upload-center-btn" onClick={() => { setActiveTab('upload'); setActiveVideo(null); }}>
+          <div className="plus-circle">+</div>
+        </button>
+        <button className={`m-nav-item ${activeTab === 'studio' ? 'active' : ''}`} onClick={() => { setActiveTab('studio'); setActiveVideo(null); }}>
+          <span className="m-icon">📊</span><span className="m-label">Студия</span>
+        </button>
+      </nav>
+
+      {/* ── Полные стили с восстановленным ПК интерфейсом и добавленным мобильным ── */}
+      <style dangerouslySetInnerHTML={{ __html: `
+        :root {
+          --win25-bg: #0b0b0c;
+          --win25-panel: rgba(22, 23, 26, 0.75);
+          --win25-panel-solid: #16171a;
+          --win25-border: rgba(255, 255, 255, 0.08);
+          --win25-accent: #0078d4;
+          --win25-accent-gradient: linear-gradient(135deg, #0078d4, #8660a9);
+          --win25-text: #f3f3f3;
+          --win25-text-dim: #adadad;
         }
 
-        /* Индикатор зависания (плашка снизу или по центру) */
-        .buffering-overlay {
-          position: absolute;
-          top: 0; left: 0; right: 0; bottom: 0;
-          background: rgba(0,0,0,0.7);
+        *, *::before, *::after { box-sizing: border-box; }
+        body {
+          margin: 0;
+          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+          background: var(--win25-bg);
+          color: var(--win25-text);
+          overflow-x: hidden;
+        }
+
+        /* ─── DESKTOP BASE ─── */
+        .wavy-app {
+          display: flex;
+          height: 100dvh;
+          background: radial-gradient(circle at 50% 0%, #1a1525 0%, #0b0b0c 70%);
+        }
+
+        /* Sidebar */
+        .wavy-sidebar {
+          width: 280px;
+          background: var(--win25-panel);
+          backdrop-filter: blur(20px);
+          border-right: 1px solid var(--win25-border);
+          padding: 24px;
           display: flex;
           flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          z-index: 10;
-          backdrop-filter: blur(4px);
+          gap: 30px;
+          flex-shrink: 0;
+          overflow-y: auto;
+          z-index: 3000;
+          transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
         }
-        .spinner {
-          width: 50px;
-          height: 50px;
-          border: 4px solid rgba(255,255,255,0.1);
-          border-top-color: #ff4e4e; /* Красный, чтобы было видно, что тупит */
-          border-radius: 50%;
-          animation: spin 1s linear infinite;
-          margin-bottom: 16px;
+
+        .sidebar-header-row { display: flex; align-items: center; justify-content: space-between; }
+        .mobile-close-btn { display: none; background: transparent; border: none; color: #fff; font-size: 20px; cursor: pointer; }
+        .mobile-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 2900; backdrop-filter: blur(4px); }
+
+        .brand h2 { margin: 0; font-size: 22px; cursor: pointer; display: flex; align-items: center; gap: 6px; }
+        .brand h2 span { font-size: 11px; padding: 3px 8px; background: var(--win25-accent-gradient); border-radius: 6px; color: #fff; font-weight: bold; }
+
+        /* Nav Menu */
+        .nav-menu { display: flex; flex-direction: column; gap: 6px; }
+        .nav-menu button {
+          background: transparent; border: 1px solid transparent; color: var(--win25-text-dim);
+          padding: 12px 16px; text-align: left; font-size: 15px; font-weight: 500; border-radius: 8px;
+          cursor: pointer; display: flex; align-items: center; gap: 12px; transition: all 0.2s ease;
         }
-        .freeze-text {
-          font-size: 16px;
-          font-weight: bold;
-          color: #ff4e4e;
-          background: rgba(0,0,0,0.8);
-          padding: 8px 16px;
-          border-radius: 8px;
+        .nav-menu button:hover { background: rgba(255, 255, 255, 0.05); color: #fff; }
+        .nav-menu button.active {
+          background: rgba(255, 255, 255, 0.08); border-color: var(--win25-border); color: #fff;
+          box-shadow: inset 0 1px 0 rgba(255,255,255,0.1);
         }
-        @keyframes spin { 100% { transform: rotate(360deg); } }
-        
-        .quality-selector { position: absolute; top: 12px; right: 12px; background: rgba(0,0,0,0.8); padding: 5px 10px; border-radius: 8px; z-index: 20; border: 1px solid rgba(255,255,255,0.1); }
-        .quality-selector select { background: transparent; color: #fff; border: none; outline: none; font-size: 13px; cursor: pointer; font-weight: bold; }
-        
-        .video-details .title { font-size: 20px; font-weight: 600; margin: 0 0 16px 0; }
-        .action-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px; margin-bottom: 20px; }
-        .author { display: flex; align-items: center; gap: 12px; }
-        .author-text { display: flex; flex-direction: column; }
-        .subscribers { font-size: 12px; color: #aaa; }
-        .btn-subscribe { background: #f1f1f1; color: #0f0f0f; border: none; padding: 10px 20px; border-radius: 20px; font-weight: bold; cursor: pointer; transition: 0.2s; }
-        .btn-subscribe:hover { background: #e0e0e0; }
-        .btn-subscribe.active { background: #272727; color: #f1f1f1; }
-        .action-group { display: flex; background: #272727; border-radius: 24px; overflow: hidden; }
-        .btn-action { background: transparent; color: #fff; border: none; padding: 10px 18px; cursor: pointer; font-weight: 500; transition: 0.2s; }
-        .btn-action:hover { background: #3f3f3f; }
-        .btn-action.left { border-right: 1px solid #3f3f3f; }
-        
-        .description-box { background: #272727; padding: 16px; border-radius: 12px; font-size: 14px; margin-bottom: 24px; line-height: 1.5; }
-        .views-bold { font-weight: bold; display: block; margin-bottom: 8px; font-size: 15px; }
-        
-        .comment-input { display: flex; gap: 15px; margin-bottom: 24px; align-items: center; }
-        .comment-input input { flex: 1; background: transparent; border: none; border-bottom: 1px solid #717171; color: #fff; padding: 10px 0; outline: none; transition: 0.2s; }
-        .comment-input input:focus { border-bottom-color: #f1f1f1; }
-        .comment-input button { background: transparent; color: #3ea6ff; border: none; font-weight: bold; cursor: pointer; padding: 10px; border-radius: 20px; transition: 0.2s; }
-        .comment-input button:hover { background: rgba(62, 166, 255, 0.1); }
-        .comment { display: flex; gap: 15px; margin-bottom: 16px; }
-        .comment .author { font-weight: bold; font-size: 13px; }
-        .comment .date { font-weight: normal; color: #aaa; margin-left: 8px; font-size: 12px; }
-        
-        .recs-list { display: flex; flex-direction: column; gap: 12px; }
-        .rec-card { display: flex; gap: 10px; cursor: pointer; border-radius: 8px; padding: 4px; transition: 0.2s; }
-        .rec-card:hover { background: #272727; }
-        .rec-card img { width: 140px; height: 78px; border-radius: 8px; object-fit: cover; }
-        .rec-card .info { display: flex; flex-direction: column; justify-content: center; }
-        .rec-card h4 { margin: 0 0 4px 0; font-size: 14px; font-weight: 500; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-        .rec-card span { font-size: 12px; color: #aaa; }
-        
-        .channel-banner { display: flex; align-items: center; gap: 24px; padding: 32px; background: #1a1a1a; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
-        .stats-badges { display: flex; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
-        .stats-badges span { background: #272727; padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; }
-        
-        .video-table-wrapper { background: #1a1a1a; border-radius: 12px; overflow-x: auto; margin-top: 15px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
-        .video-table { width: 100%; border-collapse: collapse; text-align: left; }
-        .video-table th, .video-table td { padding: 16px; border-bottom: 1px solid #272727; }
-        .table-thumb { width: 120px; height: 68px; border-radius: 8px; object-fit: cover; }
-        .actions-col button { width: 36px; height: 36px; margin-right: 8px; background: #272727; color: #fff; border: none; border-radius: 50%; cursor: pointer; transition: 0.2s; }
-        .actions-col button:hover { background: #3ea6ff; }
-        .actions-col .btn-del:hover { background: #ff4e4e; }
-        
-        .studio-layout { max-width: 800px; margin: 0 auto; }
-        .upload-card { background: #1a1a1a; padding: 32px; border-radius: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
-        .input-group { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
-        .input-group label { font-weight: 500; color: #aaa; font-size: 14px; }
-        .input-group input, .input-group textarea, .input-group select { background: #0f0f0f; border: 1px solid #272727; color: #fff; padding: 14px; border-radius: 8px; outline: none; transition: 0.2s; font-size: 15px; }
-        .input-group input:focus, .input-group textarea:focus { border-color: #3ea6ff; }
-        .file-drop { border: 2px dashed #3f3f3f; padding: 24px; background: #0f0f0f; text-align: center; border-radius: 12px; transition: 0.2s; }
-        .file-drop:hover { border-color: #3ea6ff; background: rgba(62, 166, 255, 0.05); }
-        .privacy-settings { display: flex; flex-wrap: wrap; gap: 20px; margin-bottom: 24px; background: #0f0f0f; padding: 16px; border-radius: 8px; }
-        .btn-upload-run { width: 100%; background: #3ea6ff; color: #0f0f0f; font-size: 16px; font-weight: bold; border: none; padding: 16px; border-radius: 24px; cursor: pointer; transition: 0.2s; }
-        .btn-upload-run:hover:not(:disabled) { background: #65b8ff; }
-        .btn-upload-run:disabled { background: #272727; color: #717171; cursor: not-allowed; }
-        .progress-bar { width: 100%; height: 8px; background: #272727; border-radius: 4px; overflow: hidden; margin: 12px 0; }
-        .progress-bar .fill { height: 100%; background: #3ea6ff; transition: width 0.3s; }
-        
-        /* ПОЛНОСТЬЮ ПЕРЕРАБОТАННЫЕ МОБИЛЬНЫЕ СТИЛИ */
-        @media (max-width: 900px) {
-          .wt-layout { flex-direction: column; }
-          .wt-mobile-header { display: flex; }
-          .wt-sidebar { position: fixed; top: 0; left: 0; height: 100vh; z-index: 1000; transform: translateX(-100%); width: 260px; box-shadow: 5px 0 15px rgba(0,0,0,0.8); }
-          .wt-sidebar.open { transform: translateX(0); }
-          .desktop-only { display: none; }
-          
-          .wt-main { padding: 10px; width: 100%; box-sizing: border-box; }
-          
-          .player-layout { flex-direction: column; gap: 16px; }
-          .player-primary { min-width: 100%; width: 100%; }
-          .player-secondary { width: 100%; }
-          
-          .video-wrapper { border-radius: 8px; width: 100%; aspect-ratio: 16/9; max-height: auto; }
-          .draggable-logo { font-size: 10px; padding: 4px 8px; }
-          
-          .video-details .title { font-size: 18px; margin-bottom: 12px; line-height: 1.3; }
-          .action-row { flex-direction: column; align-items: flex-start; gap: 16px; }
-          .author { width: 100%; justify-content: space-between; }
-          .actions { width: 100%; display: flex; justify-content: center; }
-          .action-group { width: 100%; display: flex; }
-          .btn-action { flex: 1; text-align: center; }
-          
-          .quality-selector { top: 8px; right: 8px; padding: 3px 6px; }
-          .quality-selector select { font-size: 12px; }
-          
-          .video-grid { grid-template-columns: 1fr; gap: 16px; }
-          .thumb-wrapper { border-radius: 8px; }
-          
-          .channel-banner { flex-direction: column; text-align: center; padding: 20px; }
-          .stats-badges { justify-content: center; }
-          
-          .rec-card img { width: 120px; height: 68px; }
-          
-          .upload-card { padding: 16px; }
-          .form-row { flex-direction: column; }
+
+        /* Channels Manager */
+        .channels-manager {
+          margin-top: auto; background: rgba(0, 0, 0, 0.2); padding: 16px;
+          border-radius: 12px; border: 1px solid var(--win25-border);
         }
-      `}</style>
+        .channels-manager-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+        .channels-manager h3 { margin: 0; font-size: 12px; color: var(--win25-text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
+        .ch-count { font-size: 11px; color: var(--win25-text-dim); background: rgba(255,255,255,0.07); padding: 2px 6px; border-radius: 4px; }
+        .channels-list { display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto; }
+        
+        .channel-pill {
+          display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px;
+          cursor: pointer; transition: background 0.2s, border 0.2s; border: 1px solid transparent; position: relative;
+        }
+        .channel-pill:hover { background: rgba(255, 255, 255, 0.05); }
+        .channel-pill:hover .ch-delete-btn { opacity: 1; }
+        .channel-pill.current { background: rgba(0, 120, 212, 0.15); border-color: rgba(0, 120, 212, 0.3); }
+        
+        .avatar-mini {
+          width: 28px; height: 28px; background: var(--win25-accent-gradient); border-radius: 50%;
+          display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; flex-shrink: 0;
+        }
+        .ch-text { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        .ch-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .ch-handle { font-size: 11px; color: var(--win25-text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        
+        .active-dot { position: absolute; right: 12px; width: 6px; height: 6px; background: var(--win25-accent); border-radius: 50%; }
+        .ch-delete-btn {
+          background: transparent; border: none; color: #888; cursor: pointer; font-size: 12px; padding: 4px;
+          border-radius: 4px; opacity: 0; transition: 0.2s; position: absolute; right: 6px;
+        }
+        .ch-delete-btn:hover { color: #e84545; background: rgba(232,17,35,0.15); }
+        
+        .add-channel-btn {
+          width: 100%; margin-top: 12px; background: rgba(0,120,212,0.1); border: 1px dashed rgba(0,120,212,0.4);
+          color: #6ab4f5; padding: 10px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600;
+          transition: 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px;
+        }
+        .add-channel-btn:hover { background: rgba(0,120,212,0.2); border-color: rgba(0,120,212,0.6); }
+        
+        .account-badge { display: flex; align-items: center; gap: 8px; padding: 12px 6px 0; }
+        .account-id-label { font-size: 12px; color: #888; }
+        .status-indicator { width: 8px; height: 8px; border-radius: 50%; }
+        .status-indicator.online { background: #30d158; box-shadow: 0 0 6px rgba(48,209,88,.5); }
+
+        /* Empty states & Loading */
+        .ch-empty-hint, .ch-no-account { text-align: center; padding: 16px 8px; color: #666; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+        .ch-empty-hint p, .ch-no-account p { margin: 0; font-size: 13px; }
+        .ch-loading { display: flex; align-items: center; gap: 10px; padding: 12px; color: #666; font-size: 14px; }
+
+        /* Main Content */
+        .wavy-main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+        .tab-container { padding: 30px 40px; flex: 1; overflow-y: auto; }
+
+        /* Header */
+        .wavy-header {
+          height: 70px; border-bottom: 1px solid var(--win25-border); display: flex; align-items: center;
+          justify-content: space-between; padding: 0 40px; background: rgba(11, 11, 12, 0.5);
+          backdrop-filter: blur(12px); flex-shrink: 0;
+        }
+        .mobile-menu-btn, .mobile-brand { display: none; }
+        
+        .search-box { position: relative; width: 450px; }
+        .search-box input {
+          width: 100%; background: rgba(255,255,255,0.05); border: 1px solid var(--win25-border);
+          padding: 12px 40px 12px 20px; border-radius: 24px; color: white; outline: none; font-size: 14px; transition: 0.2s;
+        }
+        .search-box input:focus { border-color: rgba(0,120,212,0.5); background: rgba(255,255,255,0.08); }
+        .clear-search { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); background: transparent; border: none; color: #888; font-size: 18px; cursor: pointer; }
+        
+        .user-profile-badge { display: flex; align-items: center; gap: 12px; font-size: 14px; font-weight: 500; color: #ccc; }
+
+        /* Video Grid */
+        .videos-compact-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 24px; margin-bottom: 40px; }
+        .wavy-video-card { background: rgba(255,255,255,0.02); border: 1px solid var(--win25-border); border-radius: 12px; overflow: hidden; cursor: pointer; transition: transform 0.2s, border 0.2s, box-shadow 0.2s; }
+        .wavy-video-card:hover { transform: translateY(-4px); border-color: rgba(255,255,255,0.15); box-shadow: 0 10px 20px rgba(0,0,0,0.3); }
+        
+        .thumbnail-wrapper { position: relative; aspect-ratio: 16/9; background: #121316; }
+        .thumbnail-wrapper img, .thumbnail-wrapper video { width: 100%; height: 100%; object-fit: cover; position: absolute; top: 0; left: 0; }
+        .duration-tag { position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.8); color: #fff; font-size: 11px; padding: 4px 8px; border-radius: 6px; z-index: 10; font-weight: 600; }
+        
+        .card-info { padding: 14px; }
+        .card-info h3 { margin: 0 0 6px 0; font-size: 15px; line-height: 1.4; color: #fff; }
+        .card-channel { margin: 0 0 8px 0; font-size: 13px; color: var(--win25-text-dim); }
+        .card-stats { display: flex; gap: 10px; font-size: 12px; color: #888; }
+
+        /* Playlist Section */
+        .playlist-section { margin-bottom: 40px; }
+        .playlist-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+        .playlist-header h2 { margin: 0; font-size: 22px; color: #fff; }
+        .count-tag { font-size: 13px; color: var(--win25-text-dim); background: rgba(255,255,255,0.08); padding: 4px 10px; border-radius: 6px; font-weight: 500; }
+
+        /* Empty States */
+        .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; height: 400px; color: #777; text-align: center; }
+        .cta-upload-btn { background: var(--win25-accent); color: #fff; border: none; padding: 12px 28px; border-radius: 8px; cursor: pointer; font-size: 15px; font-weight: 600; transition: 0.2s; }
+        .cta-upload-btn:hover { background: #0086f0; }
+
+        /* Watch Layout */
+        .watch-layout { display: grid; grid-template-columns: 1fr 340px; gap: 30px; }
+        .video-player-frame { width: 100%; }
+        .video-details-card { background: var(--win25-panel-solid); padding: 24px; border-radius: 16px; border: 1px solid var(--win25-border); display: flex; flex-direction: column; gap: 16px; }
+        
+        .details-header h1 { margin: 0 0 12px 0; font-size: 22px; line-height: 1.4; }
+        .action-buttons { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .like-btn { background: rgba(255,255,255,0.06); color: #fff; border: 1px solid var(--win25-border); padding: 8px 16px; border-radius: 20px; cursor: pointer; font-size: 14px; font-weight: 600; transition: 0.2s; }
+        .like-btn:hover { background: rgba(255,255,255,0.12); }
+        .views-count { font-size: 14px; color: #888; font-weight: 500; margin-left: auto; }
+        
+        .channel-author-row { display: flex; align-items: center; gap: 14px; padding: 16px 0; border-top: 1px solid var(--win25-border); border-bottom: 1px solid var(--win25-border); cursor: pointer; }
+        .author-avatar { width: 44px; height: 44px; background: var(--win25-accent); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: bold; flex-shrink: 0; }
+        .channel-author-row h3 { margin: 0; font-size: 16px; color: #fff; }
+        .channel-author-row p { margin: 4px 0 0; font-size: 13px; color: #888; }
+        .subscribe-action-btn { background: #fff; color: #000; border: none; padding: 10px 20px; border-radius: 24px; font-weight: 700; font-size: 14px; cursor: pointer; transition: 0.2s; }
+        .subscribe-action-btn:hover { opacity: 0.9; transform: scale(0.98); }
+        
+        .video-description-box { font-size: 14px; color: #ccc; line-height: 1.6; }
+        .open-comments-btn { width: 100%; background: rgba(255,255,255,0.06); border: 1px solid var(--win25-border); color: #fff; padding: 12px; border-radius: 10px; cursor: pointer; font-size: 15px; font-weight: 600; transition: 0.2s; }
+        .open-comments-btn:hover { background: rgba(255,255,255,0.1); }
+
+        /* Popups */
+        .comments-popup-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(8px); z-index: 4000; display: flex; align-items: flex-end; justify-content: center; animation: fadeIn 0.2s ease; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        
+        .comments-popup-panel, .create-ch-popup { background: var(--win25-panel-solid); border: 1px solid var(--win25-border); border-radius: 24px 24px 0 0; width: 100%; max-width: 700px; max-height: 75vh; display: flex; flex-direction: column; animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+        .create-ch-popup { max-width: 560px; max-height: 90vh; border-radius: 24px; align-self: center; margin-bottom: 5vh; } /* Центрируем для каналов */
+        @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
+        
+        .comments-popup-header { display: flex; align-items: center; justify-content: space-between; padding: 20px 28px; border-bottom: 1px solid var(--win25-border); }
+        .comments-popup-header h3 { margin: 0; font-size: 18px; display: flex; align-items: center; gap: 10px; }
+        .popup-close-btn { background: rgba(255,255,255,0.08); border: none; color: #fff; width: 36px; height: 36px; border-radius: 50%; cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
+        .popup-close-btn:hover { background: rgba(255,255,255,0.15); }
+        
+        .popup-comment-form { display: flex; gap: 12px; padding: 16px 28px; border-bottom: 1px solid var(--win25-border); background: rgba(0,0,0,0.2); }
+        .popup-comment-form input { flex: 1; background: rgba(255,255,255,0.05); border: 1px solid var(--win25-border); border-radius: 24px; padding: 12px 20px; color: #fff; font-size: 15px; outline: none; transition: 0.2s; }
+        .popup-comment-form input:focus { border-color: var(--win25-accent); background: rgba(255,255,255,0.08); }
+        .popup-submit-btn { width: 44px; height: 44px; background: var(--win25-accent); border: none; border-radius: 50%; color: white; cursor: pointer; font-size: 20px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: 0.2s; }
+        .popup-submit-btn:hover { background: #0086f0; }
+        
+        .popup-comments-list { overflow-y: auto; padding: 20px 28px; display: flex; flex-direction: column; gap: 20px; flex: 1; }
+        .popup-comment-item { display: flex; gap: 14px; }
+        .popup-c-avatar { width: 40px; height: 40px; background: #444; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; flex-shrink: 0; }
+        .popup-c-body { flex: 1; }
+        .popup-c-author { font-size: 14px; font-weight: 600; color: #eee; }
+        .popup-c-body p { margin: 6px 0 0; font-size: 15px; color: #ccc; line-height: 1.5; }
+        .popup-loading, .popup-empty { text-align: center; color: #777; padding: 30px; font-size: 15px; }
+
+        /* Create Channel Form */
+        .create-ch-form { padding: 24px; display: flex; flex-direction: column; gap: 20px; overflow-y: auto; }
+        .ch-icon-section { display: flex; gap: 20px; align-items: flex-start; }
+        .ch-icon-preview { width: 80px; height: 80px; background: rgba(0,0,0,0.4); border-radius: 50%; border: 2px solid var(--win25-border); display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden; }
+        .ch-icon-controls { flex: 1; }
+        .emoji-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 6px; margin-bottom: 12px; }
+        .emoji-option { font-size: 20px; text-align: center; padding: 6px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; transition: 0.2s; }
+        .emoji-option:hover { background: rgba(255,255,255,0.08); }
+        .emoji-option.selected { background: rgba(0,120,212,0.15); border-color: rgba(0,120,212,0.4); }
+        .upload-img-label { display: inline-block; background: rgba(255,255,255,0.08); border: 1px solid var(--win25-border); color: #ccc; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; transition: 0.2s; }
+        .upload-img-label:hover { background: rgba(255,255,255,0.12); }
+        
+        .create-ch-fields { display: flex; flex-direction: column; gap: 16px; }
+        .field-group { display: flex; flex-direction: column; gap: 8px; }
+        .field-group label { font-size: 14px; color: #ccc; font-weight: 500; }
+        .at-prefix { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: #888; font-size: 16px; pointer-events: none; }
+        .create-ch-error { background: rgba(232,17,35,0.1); border: 1px solid rgba(232,17,35,0.3); color: #ff6b6b; padding: 12px 16px; border-radius: 8px; font-size: 14px; }
+
+        /* Shorts */
+        .shorts-container-scroll { display: flex; flex-direction: column; align-items: center; height: calc(100vh - 70px); overflow-y: scroll; scroll-snap-type: y mandatory; padding-bottom: 100px; }
+        .short-vertical-slide { scroll-snap-align: start; width: 420px; height: calc(100vh - 70px); min-height: calc(100vh - 70px); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .short-player-wrapper { position: relative; width: 380px; height: 680px; background: #000; border-radius: 24px; overflow: hidden; border: 1px solid var(--win25-border); box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
+        .short-native-video { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .short-overlay-details { position: absolute; bottom: 0; left: 0; right: 0; padding: 24px 20px; background: linear-gradient(transparent, rgba(0,0,0,0.9)); pointer-events: none; }
+        .short-channel-row { display: flex; align-items: center; gap: 12px; }
+        .short-avatar { width: 40px; height: 40px; background: var(--win25-accent); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; font-size: 15px; border: 2px solid #fff; flex-shrink: 0; }
+        .short-channel-name { font-size: 15px; font-weight: 700; color: #fff; }
+        .short-title { font-size: 14px; color: #ddd; margin-top: 4px; line-height: 1.4; }
+        .short-side-actions { position: absolute; right: 12px; bottom: 90px; display: flex; flex-direction: column; gap: 16px; }
+        .short-action-btn { background: rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.15); width: 54px; height: 58px; border-radius: 14px; color: white; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12px; gap: 4px; backdrop-filter: blur(8px); transition: 0.2s; }
+        .short-action-btn:hover { background: rgba(255,255,255,0.15); transform: scale(1.05); }
+
+        /* Studio */
+        .studio-layout { display: flex; flex-direction: column; gap: 24px; max-width: 1200px; margin: 0 auto; width: 100%; }
+        .studio-top-bar { display: flex; align-items: flex-start; justify-content: space-between; }
+        .studio-top-bar h2 { margin: 0; font-size: 26px; font-weight: 700; }
+        .studio-subtitle { margin: 6px 0 0; font-size: 15px; color: #888; }
+        .btn-create-ch-top { background: rgba(255,255,255,0.08); border: 1px solid var(--win25-border); color: #fff; padding: 12px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; transition: 0.2s; }
+        .btn-create-ch-top:hover { background: rgba(255,255,255,0.15); }
+        .upload-shortcut-btn { background: var(--win25-accent-gradient); color: #fff; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; white-space: nowrap; transition: 0.2s; box-shadow: 0 4px 12px rgba(0,120,212,0.3); }
+        .upload-shortcut-btn:hover { opacity: 0.9; transform: translateY(-2px); }
+
+        .studio-ch-tabs { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+        .studio-ch-tab { display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.05); border: 1px solid var(--win25-border); color: var(--win25-text-dim); padding: 10px 18px; border-radius: 24px; cursor: pointer; font-size: 14px; font-weight: 500; transition: 0.2s; }
+        .studio-ch-tab:hover { background: rgba(255,255,255,0.1); }
+        .studio-ch-tab.active { background: rgba(0,120,212,0.15); border-color: rgba(0,120,212,0.4); color: #fff; }
+
+        .studio-table-wrapper { background: var(--win25-panel-solid); border: 1px solid var(--win25-border); border-radius: 16px; overflow-x: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.2); }
+        .studio-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 15px; min-width: 600px; }
+        .studio-table th { padding: 16px 24px; border-bottom: 1px solid var(--win25-border); font-size: 13px; color: #888; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; background: rgba(0,0,0,0.2); }
+        .studio-table td { padding: 16px 24px; border-bottom: 1px solid rgba(255,255,255,0.04); vertical-align: middle; }
+        .studio-table tr:last-child td { border-bottom: none; }
+        .studio-table tr:hover td { background: rgba(255,255,255,0.03); }
+        
+        .studio-title-cell { display: flex; align-items: center; gap: 16px; }
+        .studio-thumb { width: 80px; height: 45px; object-fit: cover; border-radius: 6px; flex-shrink: 0; border: 1px solid rgba(255,255,255,0.1); }
+        .playlist-badge { background: rgba(0,120,212,0.15); border: 1px solid rgba(0,120,212,0.3); color: #6ab4f5; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: 500; }
+        
+        .actions-cell { display: flex; gap: 10px; }
+        .btn-analytics { background: rgba(0,120,212,0.15); color: #6ab4f5; border: 1px solid rgba(0,120,212,0.3); padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; transition: 0.2s; }
+        .btn-analytics:hover { background: rgba(0,120,212,0.25); }
+        .btn-delete { background: rgba(232,17,35,0.1); color: #ff6b6b; border: 1px solid rgba(232,17,35,0.25); padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; transition: 0.2s; }
+        .btn-delete:hover { background: rgba(232,17,35,0.2); border-color: rgba(232,17,35,0.4); }
+        
+        .analytics-modal-box-acrylic { background: var(--win25-panel-solid); border: 1px solid var(--win25-border); padding: 30px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
+        .chart-timeline-container { display: flex; align-items: flex-end; gap: 8px; height: 200px; background: rgba(0,0,0,0.4); padding: 24px; border-radius: 12px; overflow-x: auto; border: 1px inset rgba(255,255,255,0.05); }
+        .chart-bar-node { flex: 1; min-width: 40px; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
+        .bar-fill-indicator { width: 100%; background: var(--win25-accent-gradient); border-radius: 4px 4px 0 0; min-height: 4px; transition: height 0.4s ease; box-shadow: 0 0 10px rgba(0,120,212,0.3); }
+        .bar-label-tag { font-size: 11px; color: #888; margin: 6px 0; font-weight: 500; }
+
+        /* Channel View */
+        .channel-page-layout { display: flex; flex-direction: column; gap: 30px; max-width: 1200px; margin: 0 auto; width: 100%; }
+        .channel-banner-acrylic { background: var(--win25-panel); border: 1px solid var(--win25-border); border-radius: 20px; padding: 40px; display: flex; align-items: center; gap: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
+        .channel-profile-avatar-big { width: 90px; height: 90px; background: var(--win25-accent-gradient); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 36px; font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+        .channel-profile-meta-big h2 { margin: 0; font-size: 28px; font-weight: 700; }
+        .channel-tab-title { font-size: 15px; color: #fff; text-transform: uppercase; letter-spacing: 1px; font-weight: 600; border-bottom: 2px solid var(--win25-accent); padding-bottom: 10px; display: inline-block; }
+
+        /* Upload Layout */
+        .upload-layout-box { max-width: 900px; margin: 0 auto; width: 100%; }
+        .upload-layout-box h2 { margin: 0 0 8px; font-size: 26px; font-weight: 700; }
+        .wavy-upload-form { margin-top: 24px; }
+        .upload-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 24px; }
+        .upload-left, .upload-right { display: flex; flex-direction: column; gap: 16px; }
+        
+        .upload-right { background: rgba(0,0,0,0.2); border: 1px dashed rgba(255,255,255,0.15); padding: 24px; border-radius: 16px; }
+        .upload-file-zone { display: flex; align-items: center; justify-content: center; background: rgba(0,120,212,0.05); border: 2px dashed rgba(0,120,212,0.4); border-radius: 12px; padding: 24px; cursor: pointer; font-size: 16px; color: #aaa; text-align: center; transition: 0.2s; font-weight: 500; }
+        .upload-file-zone:hover { background: rgba(0,120,212,0.1); border-color: rgba(0,120,212,0.6); color: #fff; }
+        .upload-file-zone input { display: none; }
+        
+        .upload-input { background: rgba(0,0,0,0.4); border: 1px solid var(--win25-border); border-radius: 10px; padding: 14px 16px; color: #fff; font-size: 15px; width: 100%; outline: none; font-family: inherit; transition: 0.2s; }
+        .upload-input:focus { border-color: var(--win25-accent); background: rgba(0,0,0,0.6); box-shadow: 0 0 0 3px rgba(0,120,212,0.15); }
+        .upload-textarea { resize: vertical; min-height: 120px; line-height: 1.5; }
+        
+        .upload-playlist-block { background: rgba(0,0,0,0.2); border: 1px solid var(--win25-border); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+        .upload-select { width: 100%; padding: 12px 14px; background: rgba(0,0,0,0.6); border: 1px solid var(--win25-border); border-radius: 8px; color: #fff; font-size: 15px; outline: none; cursor: pointer; }
+        .upload-select:focus { border-color: var(--win25-accent); }
+        .upload-playlist-create { display: flex; gap: 10px; }
+        .btn-create-playlist { background: var(--win25-accent); color: #fff; border: none; padding: 0 18px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; white-space: nowrap; transition: 0.2s; }
+        .btn-create-playlist:hover { background: #0086f0; }
+        
+        .short-toggle { display: flex; align-items: center; gap: 12px; cursor: pointer; font-size: 15px; color: #ddd; font-weight: 500; background: rgba(255,255,255,0.03); padding: 14px 16px; border-radius: 10px; border: 1px solid var(--win25-border); transition: 0.2s; }
+        .short-toggle:hover { background: rgba(255,255,255,0.06); }
+        .short-toggle input { width: 18px; height: 18px; accent-color: var(--win25-accent); cursor: pointer; }
+        
+        .upload-preview-video { width: 100%; border-radius: 10px; background: #000; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+        .btn-capture-frame { width: 100%; background: rgba(255,255,255,0.08); border: 1px solid var(--win25-border); color: #fff; padding: 12px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; transition: 0.2s; margin-top: 12px; }
+        .btn-capture-frame:hover { background: rgba(255,255,255,0.15); }
+        .upload-video-placeholder { height: 160px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.4); border-radius: 10px; color: #555; font-size: 14px; font-weight: 500; border: 1px inset rgba(255,255,255,0.05); }
+        .upload-divider { font-size: 13px; color: #666; text-align: center; margin: 8px 0; text-transform: uppercase; letter-spacing: 1px; }
+        .upload-image-input { font-size: 13px; color: #aaa; width: 100%; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px; border: 1px dashed rgba(255,255,255,0.1); cursor: pointer; }
+        
+        .upload-processing { background: rgba(0,0,0,0.5); border: 1px solid var(--win25-border); border-radius: 12px; padding: 24px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 16px; backdrop-filter: blur(10px); }
+        .upload-processing p { margin: 0; color: #6ab4f5; font-weight: 600; font-size: 16px; }
+        .upload-spinner { width: 36px; height: 36px; border: 4px solid rgba(0,120,212,0.2); border-top-color: #0078d4; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg) } }
+        .btn-cancel-upload { background: rgba(232,17,35,0.1); color: #ff6b6b; border: 1px solid rgba(232,17,35,0.3); padding: 12px 24px; border-radius: 8px; cursor: pointer; width: 100%; font-weight: 600; font-size: 15px; transition: 0.2s; }
+        .btn-cancel-upload:hover { background: rgba(232,17,35,0.2); }
+        .btn-publish { width: 100%; background: var(--win25-accent-gradient); color: #fff; border: none; padding: 16px; border-radius: 12px; cursor: pointer; font-weight: 700; font-size: 16px; letter-spacing: 0.5px; transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 8px 20px rgba(0,120,212,0.3); }
+        .btn-publish:hover { transform: translateY(-2px); box-shadow: 0 12px 24px rgba(0,120,212,0.4); }
+        .btn-publish:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
+
+        /* Search Results Banner */
+        .search-results-title { font-size: 16px; color: #fff; margin-bottom: 24px; background: rgba(0,120,212,0.1); border: 1px solid rgba(0,120,212,0.2); padding: 12px 20px; border-radius: 10px; font-weight: 500; }
+
+        /* Utilities */
+        .mobile-only-text { display: none; }
+        .desktop-only { display: flex; }
+        .desktop-only-text { display: inline; }
+        .desktop-td { display: table-cell; }
+
+        /* Scrollbars */
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
+        .mobile-bottom-nav {
+          display: none;
+        }
+
+        /* =========================================================================
+           MOBILE RESPONSIVE MEDIA QUERIES
+           ========================================================================= */
+        @media (max-width: 800px) {
+          .desktop-only { display: none !important; }
+          .desktop-only-text { display: none !important; }
+          .desktop-td { display: none !important; }
+          .mobile-only-text { display: block; }
+
+          /* Sidebar -> Drawer */
+          .wavy-sidebar {
+            position: fixed;
+            top: 0; left: 0; bottom: 0;
+            width: 280px;
+            z-index: 3000;
+            transform: translateX(-100%);
+            padding-bottom: 80px;
+          }
+          .wavy-sidebar.open { transform: translateX(0); }
+          .mobile-close-btn { display: block; }
+          .mobile-backdrop { display: block; }
+
+          /* Header */
+          .wavy-header { padding: 0 16px; gap: 12px; justify-content: flex-start; }
+          .mobile-menu-btn { display: block; background: transparent; border: none; color: white; font-size: 24px; padding: 0; cursor: pointer; }
+          .mobile-brand { display: block; font-size: 18px; font-weight: bold; background: var(--win25-accent-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+          .search-box { flex: 1; width: auto; }
+          .search-box input { padding: 8px 30px 8px 16px; font-size: 14px; border-radius: 12px; }
+          .user-profile-badge { margin-left: auto; }
+
+          /* Main content padding for bottom nav */
+          .wavy-main-content { padding-bottom: 60px; }
+          .tab-container { padding: 16px; }
+
+          /* Grids stacking */
+          .watch-layout { grid-template-columns: 1fr; gap: 16px; }
+          .upload-grid { grid-template-columns: 1fr; gap: 16px; }
+          .videos-compact-grid { grid-template-columns: 1fr; gap: 16px; }
+          .studio-table { min-width: 100%; }
+
+          /* Shorts */
+          .shorts-container-scroll { height: calc(100dvh - 64px - 60px); padding-bottom: 0; }
+          .short-vertical-slide { height: calc(100dvh - 64px - 60px); min-height: calc(100dvh - 64px - 60px); width: 100vw; max-width: 100%; padding: 0; }
+          .short-player-wrapper { border-radius: 0; border: none; width: 100%; height: 100%; }
+
+          /* Bottom Nav Bar */
+          .mobile-bottom-nav {
+            display: flex;
+            position: fixed;
+            bottom: 0; left: 0; right: 0;
+            height: 60px;
+            background: rgba(11, 11, 12, 0.95);
+            backdrop-filter: blur(15px);
+            border-top: 1px solid var(--win25-border);
+            z-index: 2500;
+            justify-content: space-around;
+            align-items: center;
+            padding: 0 10px;
+          }
+          .m-nav-item {
+            background: transparent; border: none;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            color: var(--win25-text-dim); gap: 4px; padding: 4px; cursor: pointer; flex: 1;
+          }
+          .m-nav-item.active { color: #fff; }
+          .m-icon { font-size: 22px; }
+          .m-label { font-size: 10px; font-weight: 500; }
+          .upload-center-btn { position: relative; top: -12px; }
+          .plus-circle {
+            width: 48px; height: 48px;
+            background: var(--win25-accent-gradient); color: white;
+            border-radius: 50%; display: flex; align-items: center; justify-content: center;
+            font-size: 28px; font-weight: 300; box-shadow: 0 4px 16px rgba(0,120,212,0.4);
+          }
+
+          /* Studio layout */
+          .studio-top-bar { flex-direction: column; gap: 12px; }
+          .channel-banner-acrylic { flex-direction: column; text-align: center; padding: 24px; }
+          
+          /* Popups */
+          .comments-popup-panel { border-radius: 20px 20px 0 0; max-height: 85dvh; }
+          .create-ch-popup { max-width: 100%; border-radius: 20px 20px 0 0; margin-bottom: 0; max-height: 90dvh; }
+        }
+      `}} />
     </div>
+  );
+}
+
+export default function WavyTubePage() {
+  return (
+    <Suspense fallback={<div style={{color:'#fff',padding:'40px',fontFamily:'sans-serif'}}>Загрузка WavyTube…</div>}>
+      <WavyTubeContent />
+    </Suspense>
   );
 }

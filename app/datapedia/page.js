@@ -271,6 +271,12 @@ export default function DatapediaPage() {
                         </button>
                     )}
                 </div>
+                <button 
+                className="dp-close-sidebar-btn" 
+                onClick={() => setIsSideOpen(false)}
+            >
+                ✕
+            </button>
             </aside>
 
             <main className="dp-main">
@@ -372,6 +378,26 @@ export default function DatapediaPage() {
             )}
 
             <style jsx global>{`
+                            /* Стили для кнопки закрытия */
+                .dp-close-sidebar-btn {
+                    display: none; /* Скрыто по умолчанию */
+                    position: absolute;
+                    top: 15px;
+                    right: 15px;
+                    background: transparent;
+                    border: none;
+                    color: var(--text-color); /* Или ваш цвет текста */
+                    font-size: 24px;
+                    cursor: pointer;
+                    z-index: 1001;
+                }
+
+                /* Показываем кнопку только на мобильных устройствах */
+                @media (max-width: 850px) {
+                    .dp-close-sidebar-btn {
+                        display: block;
+                    }
+                }
                 .dp-root { display: flex; height: 100vh; background: #080808; color: #eee; font-family: 'Inter', system-ui, sans-serif; }
                 .dp-sidebar { width: 280px; background: #111; border-right: 1px solid #222; display: flex; flex-direction: column; }
                 .dp-side-top { flex: 1; overflow-y: auto; padding: 20px 10px; }
