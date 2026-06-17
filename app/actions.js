@@ -760,16 +760,25 @@ export async function pdb_delete(username, dbId) {
   await syncDb(username, updatedDbs);
   return { ok: true };
 }
+
+
+
+
+
+
+
+
+
+
 export async function initWavyDB() {
-  await client.execute(`CREATE TABLE IF NOT EXISTS wt_channels (username TEXT PRIMARY KEY, avatar TEXT, description TEXT, subscribers INTEGER DEFAULT 0)`);
-  await client.execute(`CREATE TABLE IF NOT EXISTS wt_videos (id TEXT PRIMARY KEY, channel_id TEXT, title TEXT, description TEXT, playlist TEXT DEFAULT '', likes INTEGER DEFAULT 0, dislikes INTEGER DEFAULT 0, views INTEGER DEFAULT 0, duration REAL DEFAULT 0, thumbnail TEXT, is_short INTEGER DEFAULT 0, timestamp INTEGER)`);
+  await client.execute(`CREATE TABLE IF NOT EXISTS wt_channels (username TEXT PRIMARY KEY, avatar TEXT, description TEXT, subscribers INTEGER DEFAULT 0, owner_account TEXT DEFAULT '', icon TEXT DEFAULT '', display_name TEXT DEFAULT '')`);
+  await client.execute(`CREATE TABLE IF NOT EXISTS wt_videos (id TEXT PRIMARY KEY, channel_id TEXT, title TEXT, description TEXT, playlist TEXT DEFAULT '', likes INTEGER DEFAULT 0, dislikes INTEGER DEFAULT 0, views INTEGER DEFAULT 0, duration REAL DEFAULT 0, thumbnail TEXT, is_short INTEGER DEFAULT 0, timestamp INTEGER, video_data TEXT)`);
   await client.execute(`CREATE TABLE IF NOT EXISTS wt_subs (subscriber TEXT, channel TEXT, PRIMARY KEY (subscriber, channel))`);
   await client.execute(`CREATE TABLE IF NOT EXISTS wt_likes (username TEXT, video_id TEXT, type TEXT, PRIMARY KEY (username, video_id))`);
   await client.execute(`CREATE TABLE IF NOT EXISTS wt_comments (id TEXT PRIMARY KEY, video_id TEXT, username TEXT, text TEXT, timestamp INTEGER)`);
   await client.execute(`CREATE TABLE IF NOT EXISTS wt_telemetry (video_id TEXT, segment_index INTEGER, watch_count INTEGER DEFAULT 0, PRIMARY KEY (video_id, segment_index))`);
   await client.execute(`CREATE TABLE IF NOT EXISTS wt_playlists (id TEXT PRIMARY KEY, name TEXT, username TEXT)`);
 
-  // ЖЕСТКАЯ МИГРАЦИЯ ДЛЯ ИСКЛЮЧЕНИЯ ОШИБКИ 500
   try {
     const info = await client.execute("PRAGMA table_info(wt_videos)");
     const cols = info.rows.map(r => r.name);
@@ -781,36 +790,24 @@ export async function initWavyDB() {
     if (!cols.includes('dislikes')) await client.execute("ALTER TABLE wt_videos ADD COLUMN dislikes INTEGER DEFAULT 0");
     if (!cols.includes('views')) await client.execute("ALTER TABLE wt_videos ADD COLUMN views INTEGER DEFAULT 0");
     if (!cols.includes('timestamp')) await client.execute("ALTER TABLE wt_videos ADD COLUMN timestamp INTEGER DEFAULT 0");
+    if (!cols.includes('video_data')) await client.execute("ALTER TABLE wt_videos ADD COLUMN video_data TEXT DEFAULT ''");
   } catch(e) { console.error("WavyDB Video Migration error: ", e); }
-
-  try {
-    const cInfo = await client.execute("PRAGMA table_info(wt_channels)");
-    const cCols = cInfo.rows.map(r => r.name);
-    if (!cCols.includes('description')) await client.execute("ALTER TABLE wt_channels ADD COLUMN description TEXT DEFAULT ''");
-    if (!cCols.includes('avatar')) await client.execute("ALTER TABLE wt_channels ADD COLUMN avatar TEXT DEFAULT ''");
-  } catch(e) { console.error("WavyDB Channel Migration error: ", e); }
-}
-
-export async function uploadVideoFile(formData) {
-  const file = formData.get('file');
-  const videoId = formData.get('videoId');
-  if (!file || !videoId) throw new Error('No file provided');
-
-  const videosDir = join(process.cwd(), 'public', 'videos');
-  if (!existsSync(videosDir)) await mkdir(videosDir, { recursive: true });
-  const bytes = await file.arrayBuffer();
-  await writeFile(join(videosDir, `${videoId}.mp4`), Buffer.from(bytes));
-
-  return { success: true, id: videoId };
 }
 
 export async function saveVideoMetadata(videoData, analyticsData) {
+  'use server';
   await initWavyDB();
-  await client.execute({ sql: "INSERT INTO wt_channels (username, avatar) VALUES (?, ?) ON CONFLICT(username) DO NOTHING", args: [videoData.channel, `https://api.dicebear.com/7.x/bottts/svg?seed=${videoData.channel}`] });
+
   await client.execute({
-    sql: "INSERT INTO wt_videos (id, channel_id, title, description, playlist, thumbnail, is_short, duration, timestamp) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    args: [videoData.id, videoData.channel, videoData.title, videoData.description, videoData.playlist, videoData.thumbnail || '', videoData.is_short ? 1 : 0, videoData.duration || 0, Date.now()]
+    sql: "INSERT INTO wt_channels (username, avatar) VALUES (?, ?) ON CONFLICT(username) DO NOTHING",
+    args: [videoData.channel, `https://api.dicebear.com/7.x/bottts/svg?seed=${videoData.channel}`]
   });
+
+  await client.execute({
+    sql: "INSERT INTO wt_videos (id, channel_id, title, description, playlist, thumbnail, is_short, duration, timestamp, video_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    args: [videoData.id, videoData.channel, videoData.title, videoData.description, videoData.playlist, videoData.thumbnail || '', videoData.is_short ? 1 : 0, videoData.duration || 0, Date.now(), '']
+  });
+  
   return { success: true };
 }
 
@@ -895,38 +892,11 @@ export async function toggleSubscription(subscriber, channel) {
   return { success: true, isSubbed, count: count.rows[0]?.subscribers || 0 };
 }
 
-export async function getRecommendations(currentVideoId) {
-  await initWavyDB();
-  const rs = await client.execute({ sql: "SELECT * FROM wt_videos WHERE id != ? ORDER BY views DESC LIMIT 8", args: [currentVideoId] });
-  return toPlain(rs.rows).map(v => ({...v, channel: v.channel_id}));
-}
-
 export async function getChannelProfile(username) {
   await initWavyDB();
   const rs = await client.execute({ sql: "SELECT * FROM wt_channels WHERE username = ?", args: [username] });
   if (rs.rows.length === 0) return { username, avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${username}`, subscribers: 0, description: '' };
   return toPlain(rs.rows)[0];
-}
-
-export async function getChannelVideos(username) {
-  await initWavyDB();
-  const rs = await client.execute({ sql: "SELECT * FROM wt_videos WHERE channel_id = ? ORDER BY timestamp DESC", args: [username] });
-  return toPlain(rs.rows).map(v => ({...v, channel: v.channel_id}));
-}
-
-export async function updateChannelProfile(username, description, avatar) {
-  await initWavyDB();
-  await client.execute({ sql: "INSERT INTO wt_channels (username, description, avatar) VALUES (?, ?, ?) ON CONFLICT(username) DO UPDATE SET description = excluded.description, avatar = excluded.avatar", args: [username, description, avatar] });
-  return { success: true };
-}
-
-export async function deleteVideo(id, username) {
-  await initWavyDB();
-  await client.execute({ sql: "DELETE FROM wt_videos WHERE id = ? AND channel_id = ?", args: [id, username] });
-  await client.execute({ sql: "DELETE FROM wt_comments WHERE video_id = ?", args: [id] });
-  await client.execute({ sql: "DELETE FROM wt_likes WHERE video_id = ?", args: [id] });
-  await client.execute({ sql: "DELETE FROM wt_telemetry WHERE video_id = ?", args: [id] });
-  return { success: true };
 }
 
 export async function getUserPlaylists(username) {
@@ -948,138 +918,62 @@ export async function getVideoAnalytics(videoId) {
   return toPlain(rs.rows);
 }
 
-
-
-// ═══════════════════════════════════════════════════════════════════
-// ДОБАВИТЬ В КОНЕЦ actions.js — новые функции для системы каналов
-// с привязкой к аккаунту (owner_account = p_user из localStorage)
-// ═══════════════════════════════════════════════════════════════════
-
-// Миграция — добавляет поле owner_account в wt_channels если его нет
 export async function migrateChannelOwnership() {
   'use server';
   try {
     const info = await client.execute("PRAGMA table_info(wt_channels)");
     const cols = info.rows.map(r => r.name);
-    if (!cols.includes('owner_account')) {
-      await client.execute("ALTER TABLE wt_channels ADD COLUMN owner_account TEXT DEFAULT ''");
-    }
-    if (!cols.includes('icon')) {
-      await client.execute("ALTER TABLE wt_channels ADD COLUMN icon TEXT DEFAULT ''");
-    }
-    if (!cols.includes('display_name')) {
-      await client.execute("ALTER TABLE wt_channels ADD COLUMN display_name TEXT DEFAULT ''");
-    }
-  } catch(e) {
-    console.error("Channel ownership migration error:", e);
-  }
+    if (!cols.includes('owner_account')) await client.execute("ALTER TABLE wt_channels ADD COLUMN owner_account TEXT DEFAULT ''");
+    if (!cols.includes('icon')) await client.execute("ALTER TABLE wt_channels ADD COLUMN icon TEXT DEFAULT ''");
+    if (!cols.includes('display_name')) await client.execute("ALTER TABLE wt_channels ADD COLUMN display_name TEXT DEFAULT ''");
+  } catch(e) { console.error("Channel ownership migration error:", e); }
 }
 
-// Получить все каналы, принадлежащие конкретному аккаунту (p_user)
-// accountId  = localStorage.getItem('p_user')   (например "1")
-// accountKey = localStorage.getItem('p_token')   (SHA-256 хеш пароля — для верификации)
 export async function getMyAccountChannels(accountId, accountKey) {
   'use server';
   await migrateChannelOwnership();
-
-  // Верификация: хеш ключа должен совпадать с тем что лежит в users
-  const userRow = await client.execute({
-    sql: "SELECT data FROM users WHERE username = ?",
-    args: [String(accountId)]
-  });
-
-  if (userRow.rows.length === 0) {
-    // Аккаунт не найден — возвращаем пустой список (не ошибку)
-    return [];
-  }
-
-  // Проверяем что accountKey не пустой (базовая защита)
-  if (!accountKey || accountKey.length < 10) {
-    return { error: 'invalid_key' };
-  }
-
-  const rs = await client.execute({
-    sql: "SELECT * FROM wt_channels WHERE owner_account = ? ORDER BY username ASC",
-    args: [String(accountId)]
-  });
-
+  const userRow = await client.execute({ sql: "SELECT data FROM users WHERE username = ?", args: [String(accountId)] });
+  if (userRow.rows.length === 0) return [];
+  if (!accountKey || accountKey.length < 10) return { error: 'invalid_key' };
+  const rs = await client.execute({ sql: "SELECT * FROM wt_channels WHERE owner_account = ? ORDER BY username ASC", args: [String(accountId)] });
   return toPlain(rs.rows);
 }
 
-// Создать канал, привязанный к аккаунту
-// accountId  = p_user
-// accountKey = p_token (верификация)
-// channelName = уникальное имя канала (используется как username в wt_channels)
-// displayName = отображаемое название
-// icon        = base64 изображения или emoji-строка
 export async function createAccountChannel(accountId, accountKey, channelName, displayName, icon) {
   'use server';
   await migrateChannelOwnership();
+  if (!accountKey || accountKey.length < 10) return { error: 'invalid_key' };
+  if (!channelName || channelName.trim().length < 2) return { error: 'name_too_short' };
 
-  if (!accountKey || accountKey.length < 10) {
-    return { error: 'invalid_key' };
-  }
-  if (!channelName || channelName.trim().length < 2) {
-    return { error: 'name_too_short' };
-  }
+  const countRs = await client.execute({ sql: "SELECT COUNT(*) as cnt FROM wt_channels WHERE owner_account = ?", args: [String(accountId)] });
+  if (Number(countRs.rows[0]?.cnt || 0) >= 5) return { error: 'limit_reached' };
 
-  // Проверяем лимит 5 каналов на аккаунт
-  const countRs = await client.execute({
-    sql: "SELECT COUNT(*) as cnt FROM wt_channels WHERE owner_account = ?",
-    args: [String(accountId)]
-  });
-  const count = Number(countRs.rows[0]?.cnt || 0);
-  if (count >= 5) {
-    return { error: 'limit_reached' };
-  }
-
-  // Проверяем уникальность имени канала глобально
-  const existCheck = await client.execute({
-    sql: "SELECT username FROM wt_channels WHERE username = ?",
-    args: [channelName.trim()]
-  });
-  if (existCheck.rows.length > 0) {
-    return { error: 'name_taken' };
-  }
+  const existCheck = await client.execute({ sql: "SELECT username FROM wt_channels WHERE username = ?", args: [channelName.trim()] });
+  if (existCheck.rows.length > 0) return { error: 'name_taken' };
 
   await client.execute({
-    sql: `INSERT INTO wt_channels 
-          (username, display_name, avatar, icon, description, subscribers, owner_account) 
-          VALUES (?, ?, ?, ?, '', 0, ?)`,
-    args: [
-      channelName.trim(),
-      displayName?.trim() || channelName.trim(),
-      `https://api.dicebear.com/7.x/bottts/svg?seed=${channelName}`,
-      icon || '',
-      String(accountId)
-    ]
+    sql: `INSERT INTO wt_channels (username, display_name, avatar, icon, description, subscribers, owner_account) VALUES (?, ?, ?, ?, '', 0, ?)`,
+    args: [ channelName.trim(), displayName?.trim() || channelName.trim(), `https://api.dicebear.com/7.x/bottts/svg?seed=${channelName}`, icon || '', String(accountId) ]
   });
-
   return { success: true, channelId: channelName.trim() };
 }
 
-// Удалить канал (только владелец аккаунта)
+export async function verifyChannelOwnership(accountId, accountKey, channelUsername) {
+  'use server';
+  if (!accountId || !accountKey || accountKey.length < 10) return false;
+  const rs = await client.execute({ sql: "SELECT owner_account FROM wt_channels WHERE username = ?", args: [channelUsername] });
+  if (rs.rows.length === 0) return false;
+  return String(rs.rows[0].owner_account) === String(accountId);
+}
+
 export async function deleteAccountChannel(accountId, accountKey, channelUsername) {
   'use server';
   if (!accountKey || accountKey.length < 10) return { error: 'invalid_key' };
-
-  // Проверяем что канал принадлежит этому аккаунту
-  const ownerCheck = await client.execute({
-    sql: "SELECT owner_account FROM wt_channels WHERE username = ?",
-    args: [channelUsername]
-  });
-
+  const ownerCheck = await client.execute({ sql: "SELECT owner_account FROM wt_channels WHERE username = ?", args: [channelUsername] });
   if (ownerCheck.rows.length === 0) return { error: 'not_found' };
-  if (String(ownerCheck.rows[0].owner_account) !== String(accountId)) {
-    return { error: 'access_denied' };
-  }
+  if (String(ownerCheck.rows[0].owner_account) !== String(accountId)) return { error: 'access_denied' };
 
-  // Удаляем канал и все его видео
-  const videos = await client.execute({
-    sql: "SELECT id FROM wt_videos WHERE channel_id = ?",
-    args: [channelUsername]
-  });
-
+  const videos = await client.execute({ sql: "SELECT id FROM wt_videos WHERE channel_id = ?", args: [channelUsername] });
   for (const v of videos.rows) {
     await client.execute({ sql: "DELETE FROM wt_comments WHERE video_id = ?", args: [v.id] });
     await client.execute({ sql: "DELETE FROM wt_likes WHERE video_id = ?", args: [v.id] });
@@ -1089,26 +983,9 @@ export async function deleteAccountChannel(accountId, accountKey, channelUsernam
   await client.execute({ sql: "DELETE FROM wt_videos WHERE channel_id = ?", args: [channelUsername] });
   await client.execute({ sql: "DELETE FROM wt_subs WHERE channel = ?", args: [channelUsername] });
   await client.execute({ sql: "DELETE FROM wt_channels WHERE username = ?", args: [channelUsername] });
-
   return { success: true };
 }
 
-// Верификация владения каналом перед операциями с видео
-// Используется в deleteVideo и saveVideoMetadata как защита
-export async function verifyChannelOwnership(accountId, accountKey, channelUsername) {
-  'use server';
-  if (!accountId || !accountKey || accountKey.length < 10) return false;
-
-  const rs = await client.execute({
-    sql: "SELECT owner_account FROM wt_channels WHERE username = ?",
-    args: [channelUsername]
-  });
-
-  if (rs.rows.length === 0) return false;
-  return String(rs.rows[0].owner_account) === String(accountId);
-}
-
-// Обновить deleteVideo — с проверкой владения
 export async function deleteVideoSecure(videoId, channelUsername, accountId, accountKey) {
   'use server';
   const isOwner = await verifyChannelOwnership(accountId, accountKey, channelUsername);

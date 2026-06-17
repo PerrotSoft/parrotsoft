@@ -2,9 +2,7 @@ import { NextResponse } from 'next/server';
 import * as actions from '@/app/actions';
 
 // Настройка для работы с большими файлами
-export const config = {
-    api: { bodyParser: { sizeLimit: '100mb' } },
-};
+
 
 // Заголовки для обхода блокировок браузера (CORS)
 const headers = {

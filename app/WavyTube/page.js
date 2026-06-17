@@ -4,18 +4,19 @@ import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import * as actions from '../actions';
 import WavyPlayer from './components/WavyPlayer';
+import { FFmpeg } from '@ffmpeg/ffmpeg';
+import { fetchFile } from '@ffmpeg/util';
 
-// ─── Shorts: умный буфер ─────────────────────────────────────────────────────
 function ShortsPlayer({ short, isActive, isNear }) {
   const videoRef = useRef(null);
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
     if (isActive) {
-      if (!video.src || !video.src.includes(short.id)) { video.src = `/videos/${short.id}.mp4`; video.load(); }
+      if (!video.src || !video.src.includes(short.id)) { video.src = `/api/video?id=${short.id}`; video.load(); }
       video.play().catch(() => {});
     } else if (isNear) {
-      if (!video.src || !video.src.includes(short.id)) { video.src = `/videos/${short.id}.mp4`; video.load(); }
+      if (!video.src || !video.src.includes(short.id)) { video.src = `/api/video?id=${short.id}`; video.load(); }
       video.pause();
     } else {
       video.pause(); video.src = ''; video.load();
@@ -24,7 +25,6 @@ function ShortsPlayer({ short, isActive, isNear }) {
   return <video ref={videoRef} loop playsInline muted={!isActive} className="short-native-video" />;
 }
 
-// ─── Попап комментариев ──────────────────────────────────────────────────────
 function CommentsPopup({ video, currentChannel, onClose }) {
   const [comments, setComments] = useState([]);
   const [newComment, setNewComment] = useState('');
@@ -71,7 +71,6 @@ function CommentsPopup({ video, currentChannel, onClose }) {
   );
 }
 
-// ─── Попап создания канала ───────────────────────────────────────────────────
 const EMOJI_ICONS = ['🎬','📺','🎵','🎮','💻','🚀','🎨','📚','🌍','⚡','🔥','💎','🎤','📡','🛸','🌙','🦋','🎯','🏆','🌊'];
 
 function CreateChannelPopup({ accountId, accountKey, currentCount, onCreated, onClose }) {
@@ -168,7 +167,6 @@ function CreateChannelPopup({ accountId, accountKey, currentCount, onCreated, on
   );
 }
 
-// ─── Основной компонент ──────────────────────────────────────────────────────
 function WavyTubeContent() {
   const searchParams = useSearchParams();
 
@@ -176,20 +174,16 @@ function WavyTubeContent() {
   const [activeVideo, setActiveVideo] = useState(null);
   const [selectedChannelName, setSelectedChannelName] = useState(null);
 
-  // Мобильное меню (Drawer)
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Аккаунт
   const [accountId, setAccountId]   = useState('');
   const [accountKey, setAccountKey] = useState('');
 
-  // Каналы
   const [myChannels, setMyChannels]       = useState([]); 
   const [currentChannel, setCurrentChannel] = useState(null); 
   const [showCreateChannel, setShowCreateChannel] = useState(false);
   const [channelsLoading, setChannelsLoading] = useState(true);
 
-  // Контент
   const [videos, setVideos]       = useState([]);
   const [comments, setComments]   = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -199,7 +193,6 @@ function WavyTubeContent() {
   const [channelStats, setChannelStats] = useState({ isSubscribed: false, subscribers: 0 });
   const [commentsPopupVideo, setCommentsPopupVideo] = useState(null);
 
-  // Upload
   const [uploadTitle, setUploadTitle]   = useState('');
   const [uploadDesc, setUploadDesc]     = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
@@ -212,8 +205,8 @@ function WavyTubeContent() {
   const [uploadStatus, setUploadStatus]         = useState('');
   const abortControllerRef = useRef(null);
   const previewVideoRef    = useRef(null);
+  const ffmpegRef = useRef(new FFmpeg());
 
-  // Shorts
   const [activeShortsIndex, setActiveShortsIndex] = useState(0);
   const shortsRefs = useRef([]);
 
@@ -346,38 +339,87 @@ function WavyTubeContent() {
 
   const handleFastUpload = async (e) => {
     e.preventDefault();
-    if (!selectedFile || !uploadTitle || !currentChannel) return;
+    if (!selectedFile) { alert("Выберите видеофайл!"); return; }
+    if (!uploadTitle || !currentChannel) return;
+    
     const isOwner = await actions.verifyChannelOwnership(accountId, accountKey, currentChannel.username);
     if (!isOwner) { alert('Нет прав на этот канал!'); return; }
 
-    setIsProcessing(true); setUploadStatus('Отправка на сервер…');
+    setIsProcessing(true);
     abortControllerRef.current = new AbortController();
-    const { signal } = abortControllerRef.current;
 
     try {
-      const videoDuration = previewVideoRef.current?.duration || 0;
-      const videoId = 'v_' + Math.random().toString(36).substring(2, 14);
-      const fd = new FormData();
-      fd.append('file', selectedFile, `${videoId}.mp4`);
-      fd.append('videoId', videoId);
-      const uploadRes = await fetch('/api/upload', { method: 'POST', body: fd, signal });
-      if (!uploadRes.ok) throw new Error('Ошибка сети');
-      setUploadStatus('Сохранение метаданных…');
-      await actions.saveVideoMetadata({
-        id: videoId, channel: currentChannel.username,
-        title: uploadTitle, description: uploadDesc,
-        playlist: selectedPlaylist, thumbnail: thumbDataUrl,
-        is_short: isShort, duration: videoDuration,
-      }, { tags: '', audience_type: 'general' });
-      setUploadStatus('Опубликовано!');
-      setTimeout(() => {
-        setUploadTitle(''); setUploadDesc(''); setSelectedFile(null);
-        setLocalVideoUrl(null); setThumbDataUrl(null); setIsProcessing(false);
-        loadContent(); setActiveTab('home');
-      }, 1500);
+      setUploadStatus('Загрузка FFmpeg (оптимизация видео)...');
+      const ffmpeg = ffmpegRef.current;
+      if (!ffmpeg.loaded) {
+        await ffmpeg.load();
+      }
+
+      setUploadStatus('Чтение файла...');
+      await ffmpeg.writeFile('input.mp4', await fetchFile(selectedFile));
+
+      setUploadStatus('Сжатие в HD (720p), низкий битрейт и добавление FastStart...');
+      await ffmpeg.exec([
+        '-i', 'input.mp4',
+        '-vf', 'scale=-2:720',
+        '-c:v', 'libx264',
+        '-b:v', '3500k',
+        '-preset', 'ultrafast',
+        '-c:a', 'aac',
+        '-b:a', '128k',
+        '-movflags', '+faststart',
+        'output.mp4'
+      ]);
+
+      setUploadStatus('Чтение оптимизированного видео...');
+      const data = await ffmpeg.readFile('output.mp4');
+      const fastStartBlob = new Blob([data.buffer], { type: 'video/mp4' });
+
+      if (fastStartBlob.size > 100 * 1024 * 1024) {
+        alert("Из-за лимитов Vercel итоговое видео всё ещё больше 100 МБ. Выберите файл покороче.");
+        setIsProcessing(false);
+        return;
+      }
+
+      setUploadStatus('Кодирование в формат Base64...');
+      const reader = new FileReader();
+      reader.readAsDataURL(fastStartBlob);
+      reader.onloadend = async () => {
+        try {
+          const base64Video = reader.result;
+          setUploadStatus('Сохранение метаданных в БД...');
+
+          const videoDuration = previewVideoRef.current?.duration || 0;
+          const videoId = 'v_' + Math.random().toString(36).substring(2, 14);
+          
+          await actions.saveVideoMetadata({
+            id: videoId, channel: currentChannel.username,
+            title: uploadTitle, description: uploadDesc,
+            playlist: selectedPlaylist, thumbnail: thumbDataUrl,
+            is_short: isShort, duration: videoDuration,
+          }, { tags: '', audience_type: 'general' });
+
+          setUploadStatus('Отправка видео на сервер Vercel...');
+          const fd = new FormData();
+          fd.append('base64', base64Video);
+          fd.append('videoId', videoId);
+          
+          const uploadRes = await fetch('/api/upload', { method: 'POST', body: fd, signal: abortControllerRef.current.signal });
+          if (!uploadRes.ok) throw new Error('Ошибка сервера при загрузке видео');
+          
+          setUploadStatus('Опубликовано!');
+          setTimeout(() => {
+            setUploadTitle(''); setUploadDesc(''); setSelectedFile(null);
+            setLocalVideoUrl(null); setThumbDataUrl(null); setIsProcessing(false);
+            loadContent(); setActiveTab('home');
+          }, 1500);
+        } catch (err) {
+          alert('Сбой: ' + err.message); setIsProcessing(false);
+        }
+      };
     } catch (err) {
       if (err.name === 'AbortError') return;
-      alert('Сбой: ' + err.message); setIsProcessing(false);
+      alert('Сбой FFmpeg: ' + err.message); setIsProcessing(false);
     }
   };
 
@@ -433,11 +475,10 @@ function WavyTubeContent() {
 
       {mobileMenuOpen && <div className="mobile-backdrop" onClick={() => setMobileMenuOpen(false)}></div>}
 
-      {/* ── Сайдбар ── */}
       <aside className={`wavy-sidebar ${mobileMenuOpen ? 'open' : ''}`}>
         <div className="sidebar-header-row">
           <div className="brand" onClick={() => { setActiveTab('home'); setActiveVideo(null); setMobileMenuOpen(false); }}>
-            <h2>WavyTube <span>v18</span></h2>
+            <h2>WavyTube <span>v19</span></h2>
           </div>
           <button className="mobile-close-btn" onClick={() => setMobileMenuOpen(false)}>✕</button>
         </div>
@@ -451,7 +492,6 @@ function WavyTubeContent() {
           ))}
         </nav>
 
-        {/* ── Менеджер каналов ── */}
         <div className="channels-manager">
           <div className="channels-manager-header">
             <h3>Мои каналы</h3>
@@ -496,7 +536,6 @@ function WavyTubeContent() {
         </div>
       </aside>
 
-      {/* ── Основная область ── */}
       <main className="wavy-main-content">
         <header className="wavy-header">
           <button className="mobile-menu-btn" onClick={() => setMobileMenuOpen(true)}>☰</button>
@@ -525,7 +564,6 @@ function WavyTubeContent() {
             </div>
           )}
 
-          {/* ── Watch ── */}
           {activeTab === 'watch' && activeVideo && (
             <div className="watch-layout">
               <div className="video-player-frame">
@@ -563,7 +601,6 @@ function WavyTubeContent() {
             </div>
           )}
 
-          {/* ── Home ── */}
           {activeTab === 'home' && (
             <div className="home-layout">
               {searchQuery && <div className="search-results-title">Поиск: «{searchQuery}»</div>}
@@ -587,7 +624,7 @@ function WavyTubeContent() {
                         {pvs.map(video => (
                           <div key={video.id} className="wavy-video-card" onClick={() => playVideo(video)}>
                             <div className="thumbnail-wrapper">
-                              {video.thumbnail ? <img src={video.thumbnail} alt={video.title} /> : <video src={`/videos/${video.id}.mp4`} preload="metadata" muted playsInline />}
+                              {video.thumbnail ? <img src={video.thumbnail} alt={video.title} /> : <video src={`/api/video?id=${video.id}`} preload="metadata" muted playsInline />}
                               <span className="duration-tag">{video.is_short ? '⚡ Short' : 'HD'}</span>
                             </div>
                             <div className="card-info">
@@ -605,7 +642,6 @@ function WavyTubeContent() {
             </div>
           )}
 
-          {/* ── Shorts ── */}
           {activeTab === 'shorts' && (
             <div className="shorts-container-scroll">
               {shortsList.length === 0
@@ -640,7 +676,6 @@ function WavyTubeContent() {
             </div>
           )}
 
-          {/* ── Студия ── */}
           {activeTab === 'studio' && (
             <div className="studio-layout">
               <div className="studio-top-bar">
@@ -721,7 +756,6 @@ function WavyTubeContent() {
             </div>
           )}
 
-          {/* ── Channel View ── */}
           {activeTab === 'channel-view' && selectedChannelName && (
             <div className="channel-page-layout">
               <div className="channel-banner-acrylic">
@@ -736,7 +770,7 @@ function WavyTubeContent() {
                 {videos.filter(v=>v.channel===selectedChannelName).map(video=>(
                   <div key={video.id} className="wavy-video-card" onClick={()=>playVideo(video)}>
                     <div className="thumbnail-wrapper">
-                      {video.thumbnail ? <img src={video.thumbnail} alt={video.title}/> : <video src={`/videos/${video.id}.mp4`} preload="metadata" muted playsInline/>}
+                      {video.thumbnail ? <img src={video.thumbnail} alt={video.title}/> : <video src={`/api/video?id=${video.id}`} preload="metadata" muted playsInline/>}
                     </div>
                     <div className="card-info">
                       <h3>{video.title}</h3>
@@ -748,10 +782,9 @@ function WavyTubeContent() {
             </div>
           )}
 
-          {/* ── Upload ── */}
           {activeTab === 'upload' && (
             <div className="upload-layout-box">
-              <h2>Загрузка видео</h2>
+              <h2>Загрузка видео (FFmpeg)</h2>
               {!currentChannel ? (
                 <div className="empty-state">
                   <span style={{fontSize:40}}>🎬</span>
@@ -767,7 +800,7 @@ function WavyTubeContent() {
                     <div className="upload-grid">
                       <div className="upload-left">
                         <label className="upload-file-zone">
-                          <input type="file" accept="video/*" onChange={handleVideoSelect} required />
+                          <input type="file" accept="video/*" onChange={handleVideoSelect} />
                           {selectedFile ? <span style={{color:'#0078d4'}}>✓ {selectedFile.name}</span> : <span>📁 Выбрать видеофайл</span>}
                         </label>
                         <input type="text" placeholder="Название видеоролика" value={uploadTitle} onChange={e=>setUploadTitle(e.target.value)} required className="upload-input" />
@@ -807,7 +840,7 @@ function WavyTubeContent() {
                     </div>
                     {isProcessing
                       ? <div className="upload-processing"><div className="upload-spinner"/><p>{uploadStatus}</p><button type="button" onClick={()=>{abortControllerRef.current?.abort();setIsProcessing(false);}} className="btn-cancel-upload">Отменить</button></div>
-                      : <button type="submit" className="btn-publish">🚀 Опубликовать</button>
+                      : <button type="submit" className="btn-publish">🚀 Оптимизировать и Опубликовать</button>
                     }
                   </form>
                 </>
@@ -818,7 +851,6 @@ function WavyTubeContent() {
         </div>
       </main>
 
-      {/* ── Нижняя мобильная панель навигации (YouTube Style) ── */}
       <nav className="mobile-bottom-nav">
         <button className={`m-nav-item ${activeTab === 'home' ? 'active' : ''}`} onClick={() => { setActiveTab('home'); setActiveVideo(null); }}>
           <span className="m-icon">🏠</span><span className="m-label">Главная</span>
@@ -834,7 +866,6 @@ function WavyTubeContent() {
         </button>
       </nav>
 
-      {/* ── Полные стили с восстановленным ПК интерфейсом и добавленным мобильным ── */}
       <style dangerouslySetInnerHTML={{ __html: `
         :root {
           --win25-bg: #0b0b0c;
@@ -856,187 +887,99 @@ function WavyTubeContent() {
           overflow-x: hidden;
         }
 
-        /* ─── DESKTOP BASE ─── */
-        .wavy-app {
-          display: flex;
-          height: 100dvh;
-          background: radial-gradient(circle at 50% 0%, #1a1525 0%, #0b0b0c 70%);
-        }
-
-        /* Sidebar */
-        .wavy-sidebar {
-          width: 280px;
-          background: var(--win25-panel);
-          backdrop-filter: blur(20px);
-          border-right: 1px solid var(--win25-border);
-          padding: 24px;
-          display: flex;
-          flex-direction: column;
-          gap: 30px;
-          flex-shrink: 0;
-          overflow-y: auto;
-          z-index: 3000;
-          transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-        }
-
+        .wavy-app { display: flex; height: 100dvh; background: radial-gradient(circle at 50% 0%, #1a1525 0%, #0b0b0c 70%); }
+        .wavy-sidebar { width: 280px; background: var(--win25-panel); backdrop-filter: blur(20px); border-right: 1px solid var(--win25-border); padding: 24px; display: flex; flex-direction: column; gap: 30px; flex-shrink: 0; overflow-y: auto; z-index: 3000; transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
         .sidebar-header-row { display: flex; align-items: center; justify-content: space-between; }
         .mobile-close-btn { display: none; background: transparent; border: none; color: #fff; font-size: 20px; cursor: pointer; }
         .mobile-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.6); z-index: 2900; backdrop-filter: blur(4px); }
-
         .brand h2 { margin: 0; font-size: 22px; cursor: pointer; display: flex; align-items: center; gap: 6px; }
         .brand h2 span { font-size: 11px; padding: 3px 8px; background: var(--win25-accent-gradient); border-radius: 6px; color: #fff; font-weight: bold; }
-
-        /* Nav Menu */
         .nav-menu { display: flex; flex-direction: column; gap: 6px; }
-        .nav-menu button {
-          background: transparent; border: 1px solid transparent; color: var(--win25-text-dim);
-          padding: 12px 16px; text-align: left; font-size: 15px; font-weight: 500; border-radius: 8px;
-          cursor: pointer; display: flex; align-items: center; gap: 12px; transition: all 0.2s ease;
-        }
+        .nav-menu button { background: transparent; border: 1px solid transparent; color: var(--win25-text-dim); padding: 12px 16px; text-align: left; font-size: 15px; font-weight: 500; border-radius: 8px; cursor: pointer; display: flex; align-items: center; gap: 12px; transition: all 0.2s ease; }
         .nav-menu button:hover { background: rgba(255, 255, 255, 0.05); color: #fff; }
-        .nav-menu button.active {
-          background: rgba(255, 255, 255, 0.08); border-color: var(--win25-border); color: #fff;
-          box-shadow: inset 0 1px 0 rgba(255,255,255,0.1);
-        }
-
-        /* Channels Manager */
-        .channels-manager {
-          margin-top: auto; background: rgba(0, 0, 0, 0.2); padding: 16px;
-          border-radius: 12px; border: 1px solid var(--win25-border);
-        }
+        .nav-menu button.active { background: rgba(255, 255, 255, 0.08); border-color: var(--win25-border); color: #fff; box-shadow: inset 0 1px 0 rgba(255,255,255,0.1); }
+        .channels-manager { margin-top: auto; background: rgba(0, 0, 0, 0.2); padding: 16px; border-radius: 12px; border: 1px solid var(--win25-border); }
         .channels-manager-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
         .channels-manager h3 { margin: 0; font-size: 12px; color: var(--win25-text-dim); text-transform: uppercase; letter-spacing: 0.5px; }
         .ch-count { font-size: 11px; color: var(--win25-text-dim); background: rgba(255,255,255,0.07); padding: 2px 6px; border-radius: 4px; }
         .channels-list { display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto; }
-        
-        .channel-pill {
-          display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px;
-          cursor: pointer; transition: background 0.2s, border 0.2s; border: 1px solid transparent; position: relative;
-        }
+        .channel-pill { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; cursor: pointer; transition: background 0.2s, border 0.2s; border: 1px solid transparent; position: relative; }
         .channel-pill:hover { background: rgba(255, 255, 255, 0.05); }
         .channel-pill:hover .ch-delete-btn { opacity: 1; }
         .channel-pill.current { background: rgba(0, 120, 212, 0.15); border-color: rgba(0, 120, 212, 0.3); }
-        
-        .avatar-mini {
-          width: 28px; height: 28px; background: var(--win25-accent-gradient); border-radius: 50%;
-          display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; flex-shrink: 0;
-        }
+        .avatar-mini { width: 28px; height: 28px; background: var(--win25-accent-gradient); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; flex-shrink: 0; }
         .ch-text { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
         .ch-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .ch-handle { font-size: 11px; color: var(--win25-text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        
         .active-dot { position: absolute; right: 12px; width: 6px; height: 6px; background: var(--win25-accent); border-radius: 50%; }
-        .ch-delete-btn {
-          background: transparent; border: none; color: #888; cursor: pointer; font-size: 12px; padding: 4px;
-          border-radius: 4px; opacity: 0; transition: 0.2s; position: absolute; right: 6px;
-        }
+        .ch-delete-btn { background: transparent; border: none; color: #888; cursor: pointer; font-size: 12px; padding: 4px; border-radius: 4px; opacity: 0; transition: 0.2s; position: absolute; right: 6px; }
         .ch-delete-btn:hover { color: #e84545; background: rgba(232,17,35,0.15); }
-        
-        .add-channel-btn {
-          width: 100%; margin-top: 12px; background: rgba(0,120,212,0.1); border: 1px dashed rgba(0,120,212,0.4);
-          color: #6ab4f5; padding: 10px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600;
-          transition: 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px;
-        }
+        .add-channel-btn { width: 100%; margin-top: 12px; background: rgba(0,120,212,0.1); border: 1px dashed rgba(0,120,212,0.4); color: #6ab4f5; padding: 10px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; transition: 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px; }
         .add-channel-btn:hover { background: rgba(0,120,212,0.2); border-color: rgba(0,120,212,0.6); }
-        
         .account-badge { display: flex; align-items: center; gap: 8px; padding: 12px 6px 0; }
         .account-id-label { font-size: 12px; color: #888; }
         .status-indicator { width: 8px; height: 8px; border-radius: 50%; }
         .status-indicator.online { background: #30d158; box-shadow: 0 0 6px rgba(48,209,88,.5); }
-
-        /* Empty states & Loading */
         .ch-empty-hint, .ch-no-account { text-align: center; padding: 16px 8px; color: #666; display: flex; flex-direction: column; align-items: center; gap: 6px; }
         .ch-empty-hint p, .ch-no-account p { margin: 0; font-size: 13px; }
         .ch-loading { display: flex; align-items: center; gap: 10px; padding: 12px; color: #666; font-size: 14px; }
-
-        /* Main Content */
         .wavy-main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
         .tab-container { padding: 30px 40px; flex: 1; overflow-y: auto; }
-
-        /* Header */
-        .wavy-header {
-          height: 70px; border-bottom: 1px solid var(--win25-border); display: flex; align-items: center;
-          justify-content: space-between; padding: 0 40px; background: rgba(11, 11, 12, 0.5);
-          backdrop-filter: blur(12px); flex-shrink: 0;
-        }
+        .wavy-header { height: 70px; border-bottom: 1px solid var(--win25-border); display: flex; align-items: center; justify-content: space-between; padding: 0 40px; background: rgba(11, 11, 12, 0.5); backdrop-filter: blur(12px); flex-shrink: 0; }
         .mobile-menu-btn, .mobile-brand { display: none; }
-        
         .search-box { position: relative; width: 450px; }
-        .search-box input {
-          width: 100%; background: rgba(255,255,255,0.05); border: 1px solid var(--win25-border);
-          padding: 12px 40px 12px 20px; border-radius: 24px; color: white; outline: none; font-size: 14px; transition: 0.2s;
-        }
+        .search-box input { width: 100%; background: rgba(255,255,255,0.05); border: 1px solid var(--win25-border); padding: 12px 40px 12px 20px; border-radius: 24px; color: white; outline: none; font-size: 14px; transition: 0.2s; }
         .search-box input:focus { border-color: rgba(0,120,212,0.5); background: rgba(255,255,255,0.08); }
         .clear-search { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); background: transparent; border: none; color: #888; font-size: 18px; cursor: pointer; }
-        
         .user-profile-badge { display: flex; align-items: center; gap: 12px; font-size: 14px; font-weight: 500; color: #ccc; }
-
-        /* Video Grid */
         .videos-compact-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 24px; margin-bottom: 40px; }
         .wavy-video-card { background: rgba(255,255,255,0.02); border: 1px solid var(--win25-border); border-radius: 12px; overflow: hidden; cursor: pointer; transition: transform 0.2s, border 0.2s, box-shadow 0.2s; }
         .wavy-video-card:hover { transform: translateY(-4px); border-color: rgba(255,255,255,0.15); box-shadow: 0 10px 20px rgba(0,0,0,0.3); }
-        
         .thumbnail-wrapper { position: relative; aspect-ratio: 16/9; background: #121316; }
         .thumbnail-wrapper img, .thumbnail-wrapper video { width: 100%; height: 100%; object-fit: cover; position: absolute; top: 0; left: 0; }
         .duration-tag { position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.8); color: #fff; font-size: 11px; padding: 4px 8px; border-radius: 6px; z-index: 10; font-weight: 600; }
-        
         .card-info { padding: 14px; }
         .card-info h3 { margin: 0 0 6px 0; font-size: 15px; line-height: 1.4; color: #fff; }
         .card-channel { margin: 0 0 8px 0; font-size: 13px; color: var(--win25-text-dim); }
         .card-stats { display: flex; gap: 10px; font-size: 12px; color: #888; }
-
-        /* Playlist Section */
         .playlist-section { margin-bottom: 40px; }
         .playlist-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
         .playlist-header h2 { margin: 0; font-size: 22px; color: #fff; }
         .count-tag { font-size: 13px; color: var(--win25-text-dim); background: rgba(255,255,255,0.08); padding: 4px 10px; border-radius: 6px; font-weight: 500; }
-
-        /* Empty States */
         .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; height: 400px; color: #777; text-align: center; }
         .cta-upload-btn { background: var(--win25-accent); color: #fff; border: none; padding: 12px 28px; border-radius: 8px; cursor: pointer; font-size: 15px; font-weight: 600; transition: 0.2s; }
         .cta-upload-btn:hover { background: #0086f0; }
-
-        /* Watch Layout */
         .watch-layout { display: grid; grid-template-columns: 1fr 340px; gap: 30px; }
         .video-player-frame { width: 100%; }
         .video-details-card { background: var(--win25-panel-solid); padding: 24px; border-radius: 16px; border: 1px solid var(--win25-border); display: flex; flex-direction: column; gap: 16px; }
-        
         .details-header h1 { margin: 0 0 12px 0; font-size: 22px; line-height: 1.4; }
         .action-buttons { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
         .like-btn { background: rgba(255,255,255,0.06); color: #fff; border: 1px solid var(--win25-border); padding: 8px 16px; border-radius: 20px; cursor: pointer; font-size: 14px; font-weight: 600; transition: 0.2s; }
         .like-btn:hover { background: rgba(255,255,255,0.12); }
         .views-count { font-size: 14px; color: #888; font-weight: 500; margin-left: auto; }
-        
         .channel-author-row { display: flex; align-items: center; gap: 14px; padding: 16px 0; border-top: 1px solid var(--win25-border); border-bottom: 1px solid var(--win25-border); cursor: pointer; }
         .author-avatar { width: 44px; height: 44px; background: var(--win25-accent); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; font-weight: bold; flex-shrink: 0; }
         .channel-author-row h3 { margin: 0; font-size: 16px; color: #fff; }
         .channel-author-row p { margin: 4px 0 0; font-size: 13px; color: #888; }
         .subscribe-action-btn { background: #fff; color: #000; border: none; padding: 10px 20px; border-radius: 24px; font-weight: 700; font-size: 14px; cursor: pointer; transition: 0.2s; }
         .subscribe-action-btn:hover { opacity: 0.9; transform: scale(0.98); }
-        
         .video-description-box { font-size: 14px; color: #ccc; line-height: 1.6; }
         .open-comments-btn { width: 100%; background: rgba(255,255,255,0.06); border: 1px solid var(--win25-border); color: #fff; padding: 12px; border-radius: 10px; cursor: pointer; font-size: 15px; font-weight: 600; transition: 0.2s; }
         .open-comments-btn:hover { background: rgba(255,255,255,0.1); }
-
-        /* Popups */
         .comments-popup-backdrop { position: fixed; inset: 0; background: rgba(0,0,0,0.7); backdrop-filter: blur(8px); z-index: 4000; display: flex; align-items: flex-end; justify-content: center; animation: fadeIn 0.2s ease; }
         @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
-        
         .comments-popup-panel, .create-ch-popup { background: var(--win25-panel-solid); border: 1px solid var(--win25-border); border-radius: 24px 24px 0 0; width: 100%; max-width: 700px; max-height: 75vh; display: flex; flex-direction: column; animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
-        .create-ch-popup { max-width: 560px; max-height: 90vh; border-radius: 24px; align-self: center; margin-bottom: 5vh; } /* Центрируем для каналов */
+        .create-ch-popup { max-width: 560px; max-height: 90vh; border-radius: 24px; align-self: center; margin-bottom: 5vh; } 
         @keyframes slideUp { from { transform: translateY(100%); } to { transform: translateY(0); } }
-        
         .comments-popup-header { display: flex; align-items: center; justify-content: space-between; padding: 20px 28px; border-bottom: 1px solid var(--win25-border); }
         .comments-popup-header h3 { margin: 0; font-size: 18px; display: flex; align-items: center; gap: 10px; }
         .popup-close-btn { background: rgba(255,255,255,0.08); border: none; color: #fff; width: 36px; height: 36px; border-radius: 50%; cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
         .popup-close-btn:hover { background: rgba(255,255,255,0.15); }
-        
         .popup-comment-form { display: flex; gap: 12px; padding: 16px 28px; border-bottom: 1px solid var(--win25-border); background: rgba(0,0,0,0.2); }
         .popup-comment-form input { flex: 1; background: rgba(255,255,255,0.05); border: 1px solid var(--win25-border); border-radius: 24px; padding: 12px 20px; color: #fff; font-size: 15px; outline: none; transition: 0.2s; }
         .popup-comment-form input:focus { border-color: var(--win25-accent); background: rgba(255,255,255,0.08); }
         .popup-submit-btn { width: 44px; height: 44px; background: var(--win25-accent); border: none; border-radius: 50%; color: white; cursor: pointer; font-size: 20px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: 0.2s; }
         .popup-submit-btn:hover { background: #0086f0; }
-        
         .popup-comments-list { overflow-y: auto; padding: 20px 28px; display: flex; flex-direction: column; gap: 20px; flex: 1; }
         .popup-comment-item { display: flex; gap: 14px; }
         .popup-c-avatar { width: 40px; height: 40px; background: #444; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; flex-shrink: 0; }
@@ -1044,8 +987,6 @@ function WavyTubeContent() {
         .popup-c-author { font-size: 14px; font-weight: 600; color: #eee; }
         .popup-c-body p { margin: 6px 0 0; font-size: 15px; color: #ccc; line-height: 1.5; }
         .popup-loading, .popup-empty { text-align: center; color: #777; padding: 30px; font-size: 15px; }
-
-        /* Create Channel Form */
         .create-ch-form { padding: 24px; display: flex; flex-direction: column; gap: 20px; overflow-y: auto; }
         .ch-icon-section { display: flex; gap: 20px; align-items: flex-start; }
         .ch-icon-preview { width: 80px; height: 80px; background: rgba(0,0,0,0.4); border-radius: 50%; border: 2px solid var(--win25-border); display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden; }
@@ -1056,14 +997,11 @@ function WavyTubeContent() {
         .emoji-option.selected { background: rgba(0,120,212,0.15); border-color: rgba(0,120,212,0.4); }
         .upload-img-label { display: inline-block; background: rgba(255,255,255,0.08); border: 1px solid var(--win25-border); color: #ccc; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; transition: 0.2s; }
         .upload-img-label:hover { background: rgba(255,255,255,0.12); }
-        
         .create-ch-fields { display: flex; flex-direction: column; gap: 16px; }
         .field-group { display: flex; flex-direction: column; gap: 8px; }
         .field-group label { font-size: 14px; color: #ccc; font-weight: 500; }
         .at-prefix { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); color: #888; font-size: 16px; pointer-events: none; }
         .create-ch-error { background: rgba(232,17,35,0.1); border: 1px solid rgba(232,17,35,0.3); color: #ff6b6b; padding: 12px 16px; border-radius: 8px; font-size: 14px; }
-
-        /* Shorts */
         .shorts-container-scroll { display: flex; flex-direction: column; align-items: center; height: calc(100vh - 70px); overflow-y: scroll; scroll-snap-type: y mandatory; padding-bottom: 100px; }
         .short-vertical-slide { scroll-snap-align: start; width: 420px; height: calc(100vh - 70px); min-height: calc(100vh - 70px); display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
         .short-player-wrapper { position: relative; width: 380px; height: 680px; background: #000; border-radius: 24px; overflow: hidden; border: 1px solid var(--win25-border); box-shadow: 0 10px 40px rgba(0,0,0,0.5); }
@@ -1076,8 +1014,6 @@ function WavyTubeContent() {
         .short-side-actions { position: absolute; right: 12px; bottom: 90px; display: flex; flex-direction: column; gap: 16px; }
         .short-action-btn { background: rgba(0,0,0,0.6); border: 1px solid rgba(255,255,255,0.15); width: 54px; height: 58px; border-radius: 14px; color: white; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; font-size: 12px; gap: 4px; backdrop-filter: blur(8px); transition: 0.2s; }
         .short-action-btn:hover { background: rgba(255,255,255,0.15); transform: scale(1.05); }
-
-        /* Studio */
         .studio-layout { display: flex; flex-direction: column; gap: 24px; max-width: 1200px; margin: 0 auto; width: 100%; }
         .studio-top-bar { display: flex; align-items: flex-start; justify-content: space-between; }
         .studio-top-bar h2 { margin: 0; font-size: 26px; font-weight: 700; }
@@ -1086,76 +1022,61 @@ function WavyTubeContent() {
         .btn-create-ch-top:hover { background: rgba(255,255,255,0.15); }
         .upload-shortcut-btn { background: var(--win25-accent-gradient); color: #fff; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; white-space: nowrap; transition: 0.2s; box-shadow: 0 4px 12px rgba(0,120,212,0.3); }
         .upload-shortcut-btn:hover { opacity: 0.9; transform: translateY(-2px); }
-
         .studio-ch-tabs { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
         .studio-ch-tab { display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.05); border: 1px solid var(--win25-border); color: var(--win25-text-dim); padding: 10px 18px; border-radius: 24px; cursor: pointer; font-size: 14px; font-weight: 500; transition: 0.2s; }
         .studio-ch-tab:hover { background: rgba(255,255,255,0.1); }
         .studio-ch-tab.active { background: rgba(0,120,212,0.15); border-color: rgba(0,120,212,0.4); color: #fff; }
-
         .studio-table-wrapper { background: var(--win25-panel-solid); border: 1px solid var(--win25-border); border-radius: 16px; overflow-x: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.2); }
         .studio-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 15px; min-width: 600px; }
         .studio-table th { padding: 16px 24px; border-bottom: 1px solid var(--win25-border); font-size: 13px; color: #888; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; background: rgba(0,0,0,0.2); }
         .studio-table td { padding: 16px 24px; border-bottom: 1px solid rgba(255,255,255,0.04); vertical-align: middle; }
         .studio-table tr:last-child td { border-bottom: none; }
         .studio-table tr:hover td { background: rgba(255,255,255,0.03); }
-        
         .studio-title-cell { display: flex; align-items: center; gap: 16px; }
         .studio-thumb { width: 80px; height: 45px; object-fit: cover; border-radius: 6px; flex-shrink: 0; border: 1px solid rgba(255,255,255,0.1); }
         .playlist-badge { background: rgba(0,120,212,0.15); border: 1px solid rgba(0,120,212,0.3); color: #6ab4f5; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: 500; }
-        
         .actions-cell { display: flex; gap: 10px; }
         .btn-analytics { background: rgba(0,120,212,0.15); color: #6ab4f5; border: 1px solid rgba(0,120,212,0.3); padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; transition: 0.2s; }
         .btn-analytics:hover { background: rgba(0,120,212,0.25); }
         .btn-delete { background: rgba(232,17,35,0.1); color: #ff6b6b; border: 1px solid rgba(232,17,35,0.25); padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; transition: 0.2s; }
         .btn-delete:hover { background: rgba(232,17,35,0.2); border-color: rgba(232,17,35,0.4); }
-        
         .analytics-modal-box-acrylic { background: var(--win25-panel-solid); border: 1px solid var(--win25-border); padding: 30px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
         .chart-timeline-container { display: flex; align-items: flex-end; gap: 8px; height: 200px; background: rgba(0,0,0,0.4); padding: 24px; border-radius: 12px; overflow-x: auto; border: 1px inset rgba(255,255,255,0.05); }
         .chart-bar-node { flex: 1; min-width: 40px; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
         .bar-fill-indicator { width: 100%; background: var(--win25-accent-gradient); border-radius: 4px 4px 0 0; min-height: 4px; transition: height 0.4s ease; box-shadow: 0 0 10px rgba(0,120,212,0.3); }
         .bar-label-tag { font-size: 11px; color: #888; margin: 6px 0; font-weight: 500; }
-
-        /* Channel View */
         .channel-page-layout { display: flex; flex-direction: column; gap: 30px; max-width: 1200px; margin: 0 auto; width: 100%; }
         .channel-banner-acrylic { background: var(--win25-panel); border: 1px solid var(--win25-border); border-radius: 20px; padding: 40px; display: flex; align-items: center; gap: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
         .channel-profile-avatar-big { width: 90px; height: 90px; background: var(--win25-accent-gradient); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 36px; font-weight: 700; box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
         .channel-profile-meta-big h2 { margin: 0; font-size: 28px; font-weight: 700; }
         .channel-tab-title { font-size: 15px; color: #fff; text-transform: uppercase; letter-spacing: 1px; font-weight: 600; border-bottom: 2px solid var(--win25-accent); padding-bottom: 10px; display: inline-block; }
-
-        /* Upload Layout */
         .upload-layout-box { max-width: 900px; margin: 0 auto; width: 100%; }
         .upload-layout-box h2 { margin: 0 0 8px; font-size: 26px; font-weight: 700; }
         .wavy-upload-form { margin-top: 24px; }
         .upload-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 24px; }
         .upload-left, .upload-right { display: flex; flex-direction: column; gap: 16px; }
-        
         .upload-right { background: rgba(0,0,0,0.2); border: 1px dashed rgba(255,255,255,0.15); padding: 24px; border-radius: 16px; }
         .upload-file-zone { display: flex; align-items: center; justify-content: center; background: rgba(0,120,212,0.05); border: 2px dashed rgba(0,120,212,0.4); border-radius: 12px; padding: 24px; cursor: pointer; font-size: 16px; color: #aaa; text-align: center; transition: 0.2s; font-weight: 500; }
         .upload-file-zone:hover { background: rgba(0,120,212,0.1); border-color: rgba(0,120,212,0.6); color: #fff; }
         .upload-file-zone input { display: none; }
-        
         .upload-input { background: rgba(0,0,0,0.4); border: 1px solid var(--win25-border); border-radius: 10px; padding: 14px 16px; color: #fff; font-size: 15px; width: 100%; outline: none; font-family: inherit; transition: 0.2s; }
         .upload-input:focus { border-color: var(--win25-accent); background: rgba(0,0,0,0.6); box-shadow: 0 0 0 3px rgba(0,120,212,0.15); }
         .upload-textarea { resize: vertical; min-height: 120px; line-height: 1.5; }
-        
         .upload-playlist-block { background: rgba(0,0,0,0.2); border: 1px solid var(--win25-border); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
         .upload-select { width: 100%; padding: 12px 14px; background: rgba(0,0,0,0.6); border: 1px solid var(--win25-border); border-radius: 8px; color: #fff; font-size: 15px; outline: none; cursor: pointer; }
         .upload-select:focus { border-color: var(--win25-accent); }
         .upload-playlist-create { display: flex; gap: 10px; }
         .btn-create-playlist { background: var(--win25-accent); color: #fff; border: none; padding: 0 18px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; white-space: nowrap; transition: 0.2s; }
         .btn-create-playlist:hover { background: #0086f0; }
-        
         .short-toggle { display: flex; align-items: center; gap: 12px; cursor: pointer; font-size: 15px; color: #ddd; font-weight: 500; background: rgba(255,255,255,0.03); padding: 14px 16px; border-radius: 10px; border: 1px solid var(--win25-border); transition: 0.2s; }
         .short-toggle:hover { background: rgba(255,255,255,0.06); }
         .short-toggle input { width: 18px; height: 18px; accent-color: var(--win25-accent); cursor: pointer; }
-        
         .upload-preview-video { width: 100%; border-radius: 10px; background: #000; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
         .btn-capture-frame { width: 100%; background: rgba(255,255,255,0.08); border: 1px solid var(--win25-border); color: #fff; padding: 12px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; transition: 0.2s; margin-top: 12px; }
         .btn-capture-frame:hover { background: rgba(255,255,255,0.15); }
         .upload-video-placeholder { height: 160px; display: flex; align-items: center; justify-content: center; background: rgba(0,0,0,0.4); border-radius: 10px; color: #555; font-size: 14px; font-weight: 500; border: 1px inset rgba(255,255,255,0.05); }
         .upload-divider { font-size: 13px; color: #666; text-align: center; margin: 8px 0; text-transform: uppercase; letter-spacing: 1px; }
         .upload-image-input { font-size: 13px; color: #aaa; width: 100%; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px; border: 1px dashed rgba(255,255,255,0.1); cursor: pointer; }
-        
         .upload-processing { background: rgba(0,0,0,0.5); border: 1px solid var(--win25-border); border-radius: 12px; padding: 24px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 16px; backdrop-filter: blur(10px); }
         .upload-processing p { margin: 0; color: #6ab4f5; font-weight: 600; font-size: 16px; }
         .upload-spinner { width: 36px; height: 36px; border: 4px solid rgba(0,120,212,0.2); border-top-color: #0078d4; border-radius: 50%; animation: spin 0.8s linear infinite; }
@@ -1165,105 +1086,50 @@ function WavyTubeContent() {
         .btn-publish { width: 100%; background: var(--win25-accent-gradient); color: #fff; border: none; padding: 16px; border-radius: 12px; cursor: pointer; font-weight: 700; font-size: 16px; letter-spacing: 0.5px; transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 8px 20px rgba(0,120,212,0.3); }
         .btn-publish:hover { transform: translateY(-2px); box-shadow: 0 12px 24px rgba(0,120,212,0.4); }
         .btn-publish:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
-
-        /* Search Results Banner */
         .search-results-title { font-size: 16px; color: #fff; margin-bottom: 24px; background: rgba(0,120,212,0.1); border: 1px solid rgba(0,120,212,0.2); padding: 12px 20px; border-radius: 10px; font-weight: 500; }
-
-        /* Utilities */
         .mobile-only-text { display: none; }
         .desktop-only { display: flex; }
         .desktop-only-text { display: inline; }
         .desktop-td { display: table-cell; }
-
-        /* Scrollbars */
         ::-webkit-scrollbar { width: 8px; height: 8px; }
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 4px; }
         ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
-        .mobile-bottom-nav {
-          display: none;
-        }
+        .mobile-bottom-nav { display: none; }
 
-        /* =========================================================================
-           MOBILE RESPONSIVE MEDIA QUERIES
-           ========================================================================= */
         @media (max-width: 800px) {
           .desktop-only { display: none !important; }
           .desktop-only-text { display: none !important; }
           .desktop-td { display: none !important; }
           .mobile-only-text { display: block; }
-
-          /* Sidebar -> Drawer */
-          .wavy-sidebar {
-            position: fixed;
-            top: 0; left: 0; bottom: 0;
-            width: 280px;
-            z-index: 3000;
-            transform: translateX(-100%);
-            padding-bottom: 80px;
-          }
+          .wavy-sidebar { position: fixed; top: 0; left: 0; bottom: 0; width: 280px; z-index: 3000; transform: translateX(-100%); padding-bottom: 80px; }
           .wavy-sidebar.open { transform: translateX(0); }
           .mobile-close-btn { display: block; }
           .mobile-backdrop { display: block; }
-
-          /* Header */
           .wavy-header { padding: 0 16px; gap: 12px; justify-content: flex-start; }
           .mobile-menu-btn { display: block; background: transparent; border: none; color: white; font-size: 24px; padding: 0; cursor: pointer; }
           .mobile-brand { display: block; font-size: 18px; font-weight: bold; background: var(--win25-accent-gradient); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
           .search-box { flex: 1; width: auto; }
           .search-box input { padding: 8px 30px 8px 16px; font-size: 14px; border-radius: 12px; }
           .user-profile-badge { margin-left: auto; }
-
-          /* Main content padding for bottom nav */
           .wavy-main-content { padding-bottom: 60px; }
           .tab-container { padding: 16px; }
-
-          /* Grids stacking */
           .watch-layout { grid-template-columns: 1fr; gap: 16px; }
           .upload-grid { grid-template-columns: 1fr; gap: 16px; }
           .videos-compact-grid { grid-template-columns: 1fr; gap: 16px; }
           .studio-table { min-width: 100%; }
-
-          /* Shorts */
           .shorts-container-scroll { height: calc(100dvh - 64px - 60px); padding-bottom: 0; }
           .short-vertical-slide { height: calc(100dvh - 64px - 60px); min-height: calc(100dvh - 64px - 60px); width: 100vw; max-width: 100%; padding: 0; }
           .short-player-wrapper { border-radius: 0; border: none; width: 100%; height: 100%; }
-
-          /* Bottom Nav Bar */
-          .mobile-bottom-nav {
-            display: flex;
-            position: fixed;
-            bottom: 0; left: 0; right: 0;
-            height: 60px;
-            background: rgba(11, 11, 12, 0.95);
-            backdrop-filter: blur(15px);
-            border-top: 1px solid var(--win25-border);
-            z-index: 2500;
-            justify-content: space-around;
-            align-items: center;
-            padding: 0 10px;
-          }
-          .m-nav-item {
-            background: transparent; border: none;
-            display: flex; flex-direction: column; align-items: center; justify-content: center;
-            color: var(--win25-text-dim); gap: 4px; padding: 4px; cursor: pointer; flex: 1;
-          }
+          .mobile-bottom-nav { display: flex; position: fixed; bottom: 0; left: 0; right: 0; height: 60px; background: rgba(11, 11, 12, 0.95); backdrop-filter: blur(15px); border-top: 1px solid var(--win25-border); z-index: 2500; justify-content: space-around; align-items: center; padding: 0 10px; }
+          .m-nav-item { background: transparent; border: none; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--win25-text-dim); gap: 4px; padding: 4px; cursor: pointer; flex: 1; }
           .m-nav-item.active { color: #fff; }
           .m-icon { font-size: 22px; }
           .m-label { font-size: 10px; font-weight: 500; }
           .upload-center-btn { position: relative; top: -12px; }
-          .plus-circle {
-            width: 48px; height: 48px;
-            background: var(--win25-accent-gradient); color: white;
-            border-radius: 50%; display: flex; align-items: center; justify-content: center;
-            font-size: 28px; font-weight: 300; box-shadow: 0 4px 16px rgba(0,120,212,0.4);
-          }
-
-          /* Studio layout */
+          .plus-circle { width: 48px; height: 48px; background: var(--win25-accent-gradient); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 300; box-shadow: 0 4px 16px rgba(0,120,212,0.4); }
           .studio-top-bar { flex-direction: column; gap: 12px; }
           .channel-banner-acrylic { flex-direction: column; text-align: center; padding: 24px; }
-          
-          /* Popups */
           .comments-popup-panel { border-radius: 20px 20px 0 0; max-height: 85dvh; }
           .create-ch-popup { max-width: 100%; border-radius: 20px 20px 0 0; margin-bottom: 0; max-height: 90dvh; }
         }

@@ -18,8 +18,7 @@ export default function WavyPlayer({ videoId, duration }) {
     const video = videoRef.current;
     if (!video || !videoId) return;
 
-    // Прямая отдача статического MP4 (Никаких зависаний API)
-    video.src = `/videos/${videoId}.mp4`;
+    video.src = `/api/video?id=${videoId}`;
     video.load();
 
     const handleTimeTracking = () => {
@@ -50,9 +49,13 @@ export default function WavyPlayer({ videoId, duration }) {
         autoPlay 
         playsInline
         style={{ width: '100%', height: '100%', objectFit: 'contain' }}
-        onError={(e) => setErrorLog('Ошибка загрузки потока')}
+        onError={() => setErrorLog('Ошибка загрузки потока видео')}
       />
-      {errorLog && <div style={{ position: 'absolute', bottom: '20px', left: '20px', background: 'rgba(239, 68, 68, 0.9)', padding: '10px 20px', borderRadius: '8px', fontWeight: 'bold' }}>{errorLog}</div>}
+      {errorLog && (
+        <div style={{ position: 'absolute', top: 10, left: 10, background: 'rgba(232,17,35,0.9)', color: '#fff', padding: '6px 12px', borderRadius: '6px', fontSize: '12px' }}>
+          {errorLog}
+        </div>
+      )}
     </div>
   );
 }

@@ -2,6 +2,9 @@
   "name": "parrotsoft",
   "version": "0.1.0",
   "private": true,
+  "description": "This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).",
+  "license": "ISC",
+  "author": "",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -18,7 +21,6 @@
     "@vercel/blob": "^2.2.0",
     "@vercel/kv": "^3.0.0",
     "fflate": "^0.8.2",
-    "hls.js": "^1.6.16",
     "next": "^16.1.6",
     "peerjs": "^1.5.5",
     "react": "^19.0.0",
