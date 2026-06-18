@@ -435,7 +435,7 @@ async function uploadVideoInChunks(file, videoId) {
     });
 
     // Отправляем кусочек и ждем ответа (await)
-    const response = await fetch('/api/video', { // убедитесь, что путь верный
+    const response = await fetch('/api/upload', { // убедитесь, что путь верный
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
