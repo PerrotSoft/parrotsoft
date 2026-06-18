@@ -1,4 +1,5 @@
 // route.js
+export const runtime = 'edge';
 import { createClient } from '@libsql/client';
 import { NextResponse } from 'next/server';
 

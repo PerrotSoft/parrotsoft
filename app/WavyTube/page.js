@@ -523,7 +523,7 @@ function WavyTubeContent() {
           fd.append('videoId', videoId);
           
           const uploadRes = await fetch('/api/upload', { method: 'POST', body: fd, signal: abortControllerRef.current.signal });
-          if (!uploadRes.ok) throw new Error('Ошибка сервера при загрузке видео');
+          if (!uploadRes.ok) throw new Error('Ошибка сервера при загрузке видео' + (uploadRes.statusText ? `: ${uploadRes.statusText}` : ''));
           
           setUploadStatus('✅ Опубликовано!');
           setTimeout(() => {
