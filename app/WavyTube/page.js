@@ -420,36 +420,44 @@ function WavyTubeContent() {
     loadPlaylists(currentChannel.username);
   };
 async function uploadVideoInChunks(file, videoId) {
-  const CHUNK_SIZE = 1024 * 1024; // 1 МБ
+  const CHUNK_SIZE = 512 * 1024; // 512 КБ — безопасный размер с учётом base64-оверхеда
   const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
   for (let i = 0; i < totalChunks; i++) {
     const start = i * CHUNK_SIZE;
     const blob = file.slice(start, start + CHUNK_SIZE);
 
-    const chunkBase64 = await new Promise((resolve) => {
+    const chunkBase64 = await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onloadend = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error('FileReader error'));
       reader.readAsDataURL(blob);
     });
 
-    // Убираем data:-префикс И паддинг '=' — он ломает конкатенацию base64
+    // Убираем data:-префикс и паддинг '=' — он ломает конкатенацию base64
     const cleanChunk = chunkBase64
       .replace(/^data:[^;]+;base64,/, '')
-      .replace(/=+$/, '');  // ← КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ
+      .replace(/=+$/, '');
+
+    const isFirst = i === 0;
+    const isLast = i === totalChunks - 1;
 
     const response = await fetch('/api/video', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         chunk: cleanChunk,
-        videoId: videoId,
-        isFirst: i === 0,
-        isLast: i === totalChunks - 1,   // ← сигнал для финального паддинга
-      })
+        videoId,
+        isFirst,
+        isLast,
+      }),
     });
 
-    if (!response.ok) throw new Error('Ошибка загрузки куска');
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new Error(`Чанк ${i + 1}/${totalChunks} не загружен: ${errText}`);
+    }
+
     console.log(`Кусок ${i + 1}/${totalChunks} отправлен`);
   }
 }
