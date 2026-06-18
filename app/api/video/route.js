@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
 export const maxDuration = 60;
+export const dynamic = 'force-dynamic';
 
 function getClient() {
   return createClient({
@@ -79,15 +80,16 @@ export async function POST(req) {
       return NextResponse.json({ error: 'Отсутствуют chunk или videoId' }, { status: 400 });
     }
 
-    // Убираем любой data:-префикс на случай если он остался
-    const cleanChunk = chunk.replace(/^data:[^;]+;base64,/, '').replace(/=+$/, '');
+    // Убираем data:-префикс и паддинг — он ломает конкатенацию base64
+    const cleanChunk = chunk
+      .replace(/^data:[^;]+;base64,/, '')
+      .replace(/=+$/, '');
 
     if (isFirst) {
-      // UPSERT: создаём строку или перезаписываем video_data с нуля
+      // Строка уже создана saveVideoMetadata — просто перезаписываем video_data
       await client.execute({
-        sql: `INSERT INTO wt_videos (id, video_data) VALUES (?, ?)
-              ON CONFLICT(id) DO UPDATE SET video_data = excluded.video_data`,
-        args: [videoId, cleanChunk],
+        sql: "UPDATE wt_videos SET video_data = ? WHERE id = ?",
+        args: [cleanChunk, videoId],
       });
     } else {
       // Дописываем чанк к существующим данным
@@ -97,7 +99,7 @@ export async function POST(req) {
       });
     }
 
-    // Последний чанк: восстанавливаем base64-паддинг '='
+    // Последний чанк: восстанавливаем base64-паддинг
     if (isLast) {
       await client.execute({
         sql: `UPDATE wt_videos SET video_data = video_data ||
@@ -113,7 +115,7 @@ export async function POST(req) {
 
     return NextResponse.json({ success: true });
   } catch (err) {
-    console.error('[POST /api/video] Error:', err);
+    console.error('[POST /api/video] Error:', err.message);
     return NextResponse.json({ error: err.message }, { status: 500 });
   }
 }
