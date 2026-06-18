@@ -419,7 +419,36 @@ function WavyTubeContent() {
     setNewPlaylistName('');
     loadPlaylists(currentChannel.username);
   };
+async function uploadVideoInChunks(file, videoId) {
+  const CHUNK_SIZE = 1024 * 1024; // 1 МБ
+  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
+  for (let i = 0; i < totalChunks; i++) {
+    const start = i * CHUNK_SIZE;
+    const blob = file.slice(start, start + CHUNK_SIZE);
+    
+    // Превращаем только этот кусок в Base64
+    const chunkBase64 = await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result);
+      reader.readAsDataURL(blob);
+    });
+
+    // Отправляем кусочек и ждем ответа (await)
+    const response = await fetch('/api/video', { // убедитесь, что путь верный
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chunk: chunkBase64.replace(/^data:video\/\w+;base64,/, ""),
+        videoId: videoId,
+        isFirst: i === 0
+      })
+    });
+
+    if (!response.ok) throw new Error('Ошибка загрузки куска');
+    console.log(`Кусок ${i + 1}/${totalChunks} отправлен`);
+  }
+}
   const handleFastUpload = async (e) => {
     e.preventDefault();
     if (!selectedFile) { alert("Выберите видеофайл!"); return; }
@@ -522,9 +551,7 @@ function WavyTubeContent() {
           fd.append('base64', base64Video);
           fd.append('videoId', videoId);
           
-          const uploadRes = await fetch('/api/upload', { method: 'POST', body: fd, signal: abortControllerRef.current.signal });
-          if (!uploadRes.ok) throw new Error('Ошибка сервера при загрузке видео' + (uploadRes.statusText ? `: ${uploadRes.statusText}` : ''));
-          
+          uploadVideoInChunks(fastStartBlob, videoId);
           setUploadStatus('✅ Опубликовано!');
           setTimeout(() => {
             setUploadTitle(''); setUploadDesc(''); setSelectedFile(null);
