@@ -1,3 +1,4 @@
+// WavyPlayer.js
 'use client';
 
 import React, { useRef, useEffect, useState } from 'react';
@@ -48,6 +49,7 @@ export default function WavyPlayer({ videoId, duration }) {
         controls 
         autoPlay 
         playsInline
+        preload="auto"
         style={{ width: '100%', height: '100%', objectFit: 'contain' }}
         onError={() => setErrorLog('Ошибка загрузки потока видео')}
       />

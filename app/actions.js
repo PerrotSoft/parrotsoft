@@ -814,10 +814,13 @@ export async function saveVideoMetadata(videoData, analyticsData) {
 export async function getVideos(searchQuery = '') {
   await initWavyDB();
   let rs;
+  // КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ ДЛЯ СКОРОСТИ: НЕ ЗАГРУЖАЕМ video_data ПРИ ОТКРЫТИИ ЛЕНТЫ! (Снижает загрузку с 10+ сек до <1 сек)
+  const columns = "id, channel_id, title, description, playlist, likes, dislikes, views, duration, thumbnail, is_short, timestamp";
+  
   if (searchQuery) {
-    rs = await client.execute({ sql: "SELECT * FROM wt_videos WHERE title LIKE ? OR description LIKE ? ORDER BY timestamp DESC", args: [`%${searchQuery}%`, `%${searchQuery}%`] });
+    rs = await client.execute({ sql: `SELECT ${columns} FROM wt_videos WHERE title LIKE ? OR description LIKE ? ORDER BY timestamp DESC`, args: [`%${searchQuery}%`, `%${searchQuery}%`] });
   } else {
-    rs = await client.execute("SELECT * FROM wt_videos ORDER BY timestamp DESC");
+    rs = await client.execute(`SELECT ${columns} FROM wt_videos ORDER BY timestamp DESC`);
   }
   return toPlain(rs.rows).map(v => ({...v, channel: v.channel_id}));
 }

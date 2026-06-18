@@ -1,9 +1,11 @@
+// page.js
 'use client';
 
 import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import * as actions from '../actions';
 import WavyPlayer from './components/WavyPlayer';
+import { RecommendationSystem } from './components/recommendations';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile } from '@ffmpeg/util';
 
@@ -22,7 +24,8 @@ function ShortsPlayer({ short, isActive, isNear }) {
       video.pause(); video.src = ''; video.load();
     }
   }, [isActive, isNear, short.id]);
-  return <video ref={videoRef} loop playsInline muted={!isActive} className="short-native-video" />;
+  // ДОБАВЛЕНО: controls={true} для паузы, перемотки и звука в шортсах
+  return <video ref={videoRef} controls loop playsInline muted={!isActive} className="short-native-video" />;
 }
 
 function CommentsPopup({ video, currentChannel, onClose }) {
@@ -167,6 +170,69 @@ function CreateChannelPopup({ accountId, accountKey, currentCount, onCreated, on
   );
 }
 
+function RecommendationSystemg({ videos, currentVideo, onPlay, onSelectChannel }) {
+  const playlistName = currentVideo?.playlist;
+  const [viewMode, setViewMode] = useState('recommendations');
+  const [playlistSort, setPlaylistSort] = useState('recommended');
+
+  const recs = [...videos].filter(v => v.id !== currentVideo.id).map(v => {
+     let score = 0;
+     if (v.channel === currentVideo.channel) score += 5;
+     if (v.playlist === currentVideo.playlist && v.playlist !== 'Общее' && v.playlist) score += 10;
+     score += (v.views || 0) * 0.1;
+     score += (v.likes || 0) * 0.5;
+     const ageDays = (Date.now() - (v.timestamp || 0)) / (1000 * 3600 * 24);
+     score -= ageDays * 0.1;
+     return { ...v, score };
+  }).sort((a,b) => b.score - a.score);
+
+  const playlistVideos = playlistName && playlistName !== 'Общее' ? videos.filter(v => v.playlist === playlistName) : [];
+
+  const sortedPlaylist = [...playlistVideos].sort((a,b) => {
+     if (playlistSort === 'sequential') return (a.timestamp || 0) - (b.timestamp || 0);
+     const scoreA = ((a.views||0)*0.1) + ((a.likes||0)*0.5);
+     const scoreB = ((b.views||0)*0.1) + ((b.likes||0)*0.5);
+     return scoreB - scoreA;
+  });
+
+  return (
+     <div className="recommendations-panel">
+        {playlistVideos.length > 0 && viewMode === 'recommendations' && (
+           <button className="btn-view-playlist" onClick={() => setViewMode('playlist')}>
+              📁 Посмотреть плейлист: {playlistName} ({playlistVideos.length})
+           </button>
+        )}
+
+        {viewMode === 'playlist' && (
+           <div className="playlist-view-header">
+              <button className="btn-back-recs" onClick={() => setViewMode('recommendations')}>← Назад к рекомендациям</button>
+              <h3>Плейлист: {playlistName}</h3>
+              <div className="sort-toggles">
+                 <button className={playlistSort === 'sequential' ? 'active' : ''} onClick={()=>setPlaylistSort('sequential')}>По порядку</button>
+                 <button className={playlistSort === 'recommended' ? 'active' : ''} onClick={()=>setPlaylistSort('recommended')}>По рекомендации</button>
+              </div>
+           </div>
+        )}
+
+        <div className="recs-list">
+           {(viewMode === 'playlist' ? sortedPlaylist : recs).map(v => (
+              <div key={v.id} className="rec-card" onClick={() => onPlay(v)}>
+                 <div className={`rec-thumb ${v.is_short ? 'vertical' : ''}`}>
+                    {v.thumbnail ? <img src={v.thumbnail} alt={v.title} /> : <div style={{width:'100%', height:'100%', background:'#222'}} />}
+                    {v.is_short && <span className="duration-tag">⚡ Short</span>}
+                 </div>
+                 <div className="rec-info">
+                    <h4>{v.title}</h4>
+                    <p className="ch-link" onClick={(e) => { e.stopPropagation(); onSelectChannel(v.channel); }}>@{v.channel}</p>
+                    <p>👁 {v.views||0} • {new Date(v.timestamp||Date.now()).toLocaleDateString()}</p>
+                 </div>
+              </div>
+           ))}
+        </div>
+     </div>
+  );
+}
+
 function WavyTubeContent() {
   const searchParams = useSearchParams();
 
@@ -201,6 +267,17 @@ function WavyTubeContent() {
   const [playlists, setPlaylists]         = useState([]);
   const [selectedPlaylist, setSelectedPlaylist] = useState('');
   const [newPlaylistName, setNewPlaylistName]   = useState('');
+  
+  const [trimStart, setTrimStart] = useState('');
+  const [trimEnd, setTrimEnd] = useState('');
+  
+  // ДОБАВЛЕНО: Расширенные настройки сжатия
+  const [compressLevel, setCompressLevel] = useState('veryfast');
+  const [compressBitrate, setCompressBitrate] = useState('2500k');
+  const [compressAudio, setCompressAudio] = useState('128k');
+  const [compressScale, setCompressScale] = useState('-2:720');
+  const [ffmpegProgress, setFfmpegProgress] = useState(0);
+
   const [isProcessing, setIsProcessing]         = useState(false);
   const [uploadStatus, setUploadStatus]         = useState('');
   const abortControllerRef = useRef(null);
@@ -313,7 +390,13 @@ function WavyTubeContent() {
 
   const handleVideoSelect = (e) => {
     const file = e.target.files[0];
-    if (file) { setSelectedFile(file); setLocalVideoUrl(URL.createObjectURL(file)); setThumbDataUrl(null); }
+    if (file) { 
+      setSelectedFile(file); 
+      setLocalVideoUrl(URL.createObjectURL(file)); 
+      setThumbDataUrl(null);
+      setTrimStart('');
+      setTrimEnd('');
+    }
   };
 
   const captureFrameFromVideo = () => {
@@ -346,50 +429,84 @@ function WavyTubeContent() {
     if (!isOwner) { alert('Нет прав на этот канал!'); return; }
 
     setIsProcessing(true);
+    setFfmpegProgress(0);
     abortControllerRef.current = new AbortController();
 
     try {
-      setUploadStatus('Загрузка FFmpeg (оптимизация видео)...');
+      setUploadStatus('Загрузка движка оптимизации (FFmpeg)...');
       const ffmpeg = ffmpegRef.current;
       if (!ffmpeg.loaded) {
         await ffmpeg.load();
       }
 
-      setUploadStatus('Чтение файла...');
+      ffmpeg.on('progress', ({ progress }) => {
+        setFfmpegProgress(Math.round(progress * 100));
+      });
+
+      setUploadStatus('Чтение исходного файла...');
       await ffmpeg.writeFile('input.mp4', await fetchFile(selectedFile));
 
-      setUploadStatus('Сжатие в HD (720p), низкий битрейт и добавление FastStart...');
-      await ffmpeg.exec([
-        '-i', 'input.mp4',
-        '-vf', 'scale=-2:720',
+      setUploadStatus('Применение настроек сжатия и кодирование...');
+      
+      const tStart = parseFloat(trimStart);
+      const tEnd = parseFloat(trimEnd);
+      let args = [];
+      
+      if (!isNaN(tStart) && tStart > 0) args.push('-ss', tStart.toString());
+      if (!isNaN(tEnd) && tEnd > 0) args.push('-to', tEnd.toString());
+      
+      args.push('-i', 'input.mp4');
+
+      if (isShort) {
+        const calculatedDur = (!isNaN(tEnd) ? tEnd : (previewVideoRef.current?.duration || 0)) - (!isNaN(tStart) ? tStart : 0);
+        if (calculatedDur > 600) {
+            alert("Ошибка: Shorts не может быть длиннее 10 минут (600 секунд)! Пожалуйста, обрежьте видео.");
+            setIsProcessing(false);
+            return;
+        }
+        args.push('-vf', 'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2');
+      } else {
+        // ИСПРАВЛЕНО: Добавлен префикс "scale="
+        args.push('-vf', `scale=${compressScale}`);
+      }
+
+      args.push(
         '-c:v', 'libx264',
-        '-b:v', '3500k',
-        '-preset', 'ultrafast',
+        '-b:v', compressBitrate,
+        '-preset', compressLevel,
         '-c:a', 'aac',
-        '-b:a', '128k',
+        '-b:a', compressAudio,
         '-movflags', '+faststart',
         'output.mp4'
-      ]);
+      );
 
-      setUploadStatus('Чтение оптимизированного видео...');
+      // ДОБАВЛЕНО: Проверка на краш FFmpeg
+      const exitCode = await ffmpeg.exec(args);
+      if (exitCode !== 0) {
+        throw new Error("FFmpeg вылетел с ошибкой. Попробуйте выбрать другие настройки разрешения или сжатия.");
+      }
+
+      setUploadStatus('Обработка завершена! Чтение оптимизированного видео...');
       const data = await ffmpeg.readFile('output.mp4');
       const fastStartBlob = new Blob([data.buffer], { type: 'video/mp4' });
 
-      if (fastStartBlob.size > 100 * 1024 * 1024) {
-        alert("Из-за лимитов Vercel итоговое видео всё ещё больше 100 МБ. Выберите файл покороче.");
+      const maxSize = isShort ? 35 * 1024 * 1024 : 200 * 1024 * 1024;
+      if (fastStartBlob.size > maxSize) {
+        alert(`Итоговое видео слишком большое (${(fastStartBlob.size / 1024 / 1024).toFixed(2)} МБ)! Лимит для ${isShort ? 'Shorts — 35 МБ' : 'видео — 200 МБ'}. Попробуйте усилить сжатие или уменьшить битрейт.`);
         setIsProcessing(false);
         return;
       }
 
-      setUploadStatus('Кодирование в формат Base64...');
+      setUploadStatus('Кодирование для отправки на сервер...');
       const reader = new FileReader();
       reader.readAsDataURL(fastStartBlob);
       reader.onloadend = async () => {
         try {
           const base64Video = reader.result;
-          setUploadStatus('Сохранение метаданных в БД...');
+          setUploadStatus('Сохранение информации о видео...');
 
-          const videoDuration = previewVideoRef.current?.duration || 0;
+          const finalDur = (!isNaN(tEnd) ? tEnd : (previewVideoRef.current?.duration || 0)) - (!isNaN(tStart) ? tStart : 0);
+          const videoDuration = finalDur > 0 ? finalDur : 0;
           const videoId = 'v_' + Math.random().toString(36).substring(2, 14);
           
           await actions.saveVideoMetadata({
@@ -399,7 +516,8 @@ function WavyTubeContent() {
             is_short: isShort, duration: videoDuration,
           }, { tags: '', audience_type: 'general' });
 
-          setUploadStatus('Отправка видео на сервер Vercel...');
+          setUploadStatus('Отправка медиафайла на сервер...');
+          setFfmpegProgress(100);
           const fd = new FormData();
           fd.append('base64', base64Video);
           fd.append('videoId', videoId);
@@ -407,10 +525,11 @@ function WavyTubeContent() {
           const uploadRes = await fetch('/api/upload', { method: 'POST', body: fd, signal: abortControllerRef.current.signal });
           if (!uploadRes.ok) throw new Error('Ошибка сервера при загрузке видео');
           
-          setUploadStatus('Опубликовано!');
+          setUploadStatus('✅ Опубликовано!');
           setTimeout(() => {
             setUploadTitle(''); setUploadDesc(''); setSelectedFile(null);
             setLocalVideoUrl(null); setThumbDataUrl(null); setIsProcessing(false);
+            setTrimStart(''); setTrimEnd(''); setFfmpegProgress(0);
             loadContent(); setActiveTab('home');
           }, 1500);
         } catch (err) {
@@ -419,7 +538,7 @@ function WavyTubeContent() {
       };
     } catch (err) {
       if (err.name === 'AbortError') return;
-      alert('Сбой FFmpeg: ' + err.message); setIsProcessing(false);
+      alert('Сбой: ' + err.message); setIsProcessing(false);
     }
   };
 
@@ -434,25 +553,18 @@ function WavyTubeContent() {
     setAnalyticsVideo(video);
     const dbStats = await actions.getVideoAnalytics(video.id);
     if (dbStats?.length > 0) {
-      setMockSegmentData(dbStats.map(s => ({ segment: `${s.segment_index}`, views: s.watch_count })));
+      setMockSegmentData(dbStats.map(s => ({ segment: parseInt(s.segment_index), views: s.watch_count })));
     } else {
-      setMockSegmentData(Array.from({ length: 20 }, (_, i) => ({ segment: `${i+1}`, views: Math.floor(Math.random() * (video.views || 100)) })));
+      setMockSegmentData(Array.from({ length: 20 }, (_, i) => ({ segment: i+1, views: Math.floor(Math.random() * (video.views || 100)) })));
     }
   };
-
-  const playlistsGroup = videos.filter(v => !v.is_short).reduce((acc, v) => {
-    const pl = v.playlist || 'Общее';
-    if (!acc[pl]) acc[pl] = [];
-    acc[pl].push(v);
-    return acc;
-  }, {});
 
   const filteredVideos = videos.filter(v =>
     v.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     v.playlist?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  ).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
-  const shortsList = videos.filter(v => v.is_short || v.playlist === 'Shorts');
+  const shortsList = videos.filter(v => v.is_short || v.playlist === 'Shorts').sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
   const chIcon = (ch) => {
     if (!ch) return '?';
@@ -478,7 +590,7 @@ function WavyTubeContent() {
       <aside className={`wavy-sidebar ${mobileMenuOpen ? 'open' : ''}`}>
         <div className="sidebar-header-row">
           <div className="brand" onClick={() => { setActiveTab('home'); setActiveVideo(null); setMobileMenuOpen(false); }}>
-            <h2>WavyTube <span>v19</span></h2>
+            <h2>WavyTube <span>v20.2</span></h2>
           </div>
           <button className="mobile-close-btn" onClick={() => setMobileMenuOpen(false)}>✕</button>
         </div>
@@ -566,37 +678,48 @@ function WavyTubeContent() {
 
           {activeTab === 'watch' && activeVideo && (
             <div className="watch-layout">
-              <div className="video-player-frame">
-                <WavyPlayer videoId={activeVideo.id} duration={activeVideo.duration} />
+              <div className="watch-main-column">
+                <div className="video-player-frame">
+                  <WavyPlayer videoId={activeVideo.id} duration={activeVideo.duration} />
+                </div>
+                <div className="video-details-card">
+                  <div className="details-header">
+                    <h1>{activeVideo.title}</h1>
+                    <div className="action-buttons">
+                      <button className="like-btn" onClick={() => toggleLike('like')}>👍 {activeVideo.likes || 0}</button>
+                      <button className="like-btn" onClick={() => toggleLike('dislike')}>👎 {activeVideo.dislikes || 0}</button>
+                      <span className="views-count">👁 {activeVideo.views || 0}</span>
+                    </div>
+                  </div>
+                  <div className="channel-author-row" onClick={() => { setSelectedChannelName(activeVideo.channel); setActiveTab('channel-view'); }}>
+                    <div className="author-avatar">{activeVideo.channel?.[0]}</div>
+                    <div style={{ flex: 1 }}>
+                      <h3>{activeVideo.channel}</h3>
+                      <p>{channelStats.subscribers} подписчиков</p>
+                    </div>
+                    {currentChannel?.username !== activeVideo.channel && (
+                      <button className="subscribe-action-btn" onClick={e => { e.stopPropagation(); toggleSubscription(); }}>
+                        {channelStats.isSubscribed ? 'Отписаться' : 'Подписаться'}
+                      </button>
+                    )}
+                  </div>
+                  <div className="video-description-box">
+                    <p>{activeVideo.description || 'Описание отсутствует.'}</p>
+                    <p style={{color: '#888', marginTop: 8, fontSize: 12}}>Опубликовано: {new Date(activeVideo.timestamp || Date.now()).toLocaleDateString()}</p>
+                  </div>
+                  <button className="open-comments-btn" onClick={() => setCommentsPopupVideo(activeVideo)}>
+                    💬 Комментарии ({comments.length})
+                  </button>
+                </div>
               </div>
-              <div className="video-details-card">
-                <div className="details-header">
-                  <h1>{activeVideo.title}</h1>
-                  <div className="action-buttons">
-                    <button className="like-btn" onClick={() => toggleLike('like')}>👍 {activeVideo.likes || 0}</button>
-                    <button className="like-btn" onClick={() => toggleLike('dislike')}>👎 {activeVideo.dislikes || 0}</button>
-                    <span className="views-count">👁 {activeVideo.views || 0}</span>
-                  </div>
-                </div>
-                <div className="playlist-link-node">
-                  📁 <strong style={{ cursor:'pointer', color:'#0078d4' }} onClick={() => { setSearchQuery(activeVideo.playlist); setActiveTab('home'); }}>{activeVideo.playlist || 'Общее'}</strong>
-                </div>
-                <div className="channel-author-row" onClick={() => { setSelectedChannelName(activeVideo.channel); setActiveTab('channel-view'); }}>
-                  <div className="author-avatar">{activeVideo.channel?.[0]}</div>
-                  <div style={{ flex: 1 }}>
-                    <h3>{activeVideo.channel}</h3>
-                    <p>{channelStats.subscribers} подписчиков</p>
-                  </div>
-                  {currentChannel?.username !== activeVideo.channel && (
-                    <button className="subscribe-action-btn" onClick={e => { e.stopPropagation(); toggleSubscription(); }}>
-                      {channelStats.isSubscribed ? 'Отписаться' : 'Подписаться'}
-                    </button>
-                  )}
-                </div>
-                <div className="video-description-box"><p>{activeVideo.description || 'Описание отсутствует.'}</p></div>
-                <button className="open-comments-btn" onClick={() => setCommentsPopupVideo(activeVideo)}>
-                  💬 Комментарии ({comments.length})
-                </button>
+
+              <div className="watch-side-column">
+                <RecommendationSystem 
+                  videos={videos} 
+                  currentVideo={activeVideo} 
+                  onPlay={playVideo} 
+                  onSelectChannel={(ch) => { setSelectedChannelName(ch); setActiveTab('channel-view'); }}
+                />
               </div>
             </div>
           )}
@@ -604,40 +727,28 @@ function WavyTubeContent() {
           {activeTab === 'home' && (
             <div className="home-layout">
               {searchQuery && <div className="search-results-title">Поиск: «{searchQuery}»</div>}
-              {Object.keys(playlistsGroup).length === 0 ? (
+              {filteredVideos.length === 0 ? (
                 <div className="empty-state">
                   <span style={{ fontSize: 40 }}>📭</span>
                   <p>Видео ещё нет.</p>
                   {currentChannel && <button onClick={() => setActiveTab('upload')} className="cta-upload-btn">Загрузить видео</button>}
                 </div>
               ) : (
-                Object.keys(playlistsGroup).map(plName => {
-                  const pvs = playlistsGroup[plName].filter(v => filteredVideos.some(fv => fv.id === v.id));
-                  if (pvs.length === 0) return null;
-                  return (
-                    <section key={plName} className="playlist-section">
-                      <div className="playlist-header">
-                        <h2>📁 {plName}</h2>
-                        <span className="count-tag">{pvs.length} видео</span>
+                <div className="videos-compact-grid">
+                  {filteredVideos.map(video => (
+                    <div key={video.id} className="wavy-video-card" onClick={() => playVideo(video)}>
+                      <div className="thumbnail-wrapper">
+                        {video.thumbnail ? <img src={video.thumbnail} alt={video.title} /> : <div style={{width:'100%', height:'100%', background:'#222'}} />}
+                        <span className="duration-tag">{video.is_short ? '⚡ Short' : 'HD'}</span>
                       </div>
-                      <div className="videos-compact-grid">
-                        {pvs.map(video => (
-                          <div key={video.id} className="wavy-video-card" onClick={() => playVideo(video)}>
-                            <div className="thumbnail-wrapper">
-                              {video.thumbnail ? <img src={video.thumbnail} alt={video.title} /> : <video src={`/api/video?id=${video.id}`} preload="metadata" muted playsInline />}
-                              <span className="duration-tag">{video.is_short ? '⚡ Short' : 'HD'}</span>
-                            </div>
-                            <div className="card-info">
-                              <h3>{video.title}</h3>
-                              <p className="card-channel">@{video.channel}</p>
-                              <div className="card-stats"><span>👁 {video.views||0}</span><span>•</span><span>👍 {video.likes||0}</span></div>
-                            </div>
-                          </div>
-                        ))}
+                      <div className="card-info">
+                        <h3>{video.title}</h3>
+                        <p className="card-channel">@{video.channel}</p>
+                        <div className="card-stats"><span>👁 {video.views||0}</span><span>•</span><span>👍 {video.likes||0}</span></div>
                       </div>
-                    </section>
-                  );
-                })
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           )}
@@ -738,16 +849,17 @@ function WavyTubeContent() {
                   <div className="modal-header">
                     <div>
                       <h3>Аналитика: {analyticsVideo.title}</h3>
+                      <p style={{fontSize:13, color:'#888', margin:'6px 0 0'}}>График показывает, сколько раз зрители посмотрели каждый отрезок видео. Если столбик высокий — этот момент пересматривали часто. Если низкий — его пропускали.</p>
                     </div>
                     <button onClick={() => setAnalyticsVideo(null)} className="close-modal">✕</button>
                   </div>
-                  <h4 style={{margin:'20px 0 10px',fontSize:14,color:'#aaa'}}>Удержание по сегментам</h4>
+                  <h4 style={{margin:'20px 0 10px',fontSize:14,color:'#aaa'}}>Удержание по сегментам (по умолчанию каждые 10 сек)</h4>
                   <div className="chart-timeline-container">
                     {mockSegmentData.map((pt, idx) => (
-                      <div key={idx} className="chart-bar-node" title={`Просмотры: ${pt.views}`}>
-                        <div className="bar-label-tag">{pt.views}</div>
+                      <div key={idx} className="chart-bar-node" title={`Сегмент ${pt.segment} - Просмотры: ${pt.views}`}>
+                        <div className="bar-label-tag">{pt.views} 👁</div>
                         <div className="bar-fill-indicator" style={{height:`${Math.max(5,(pt.views/200)*100)}%`}} />
-                        <div className="bar-label-tag">{idx+1}</div>
+                        <div className="bar-label-tag">#{pt.segment}</div>
                       </div>
                     ))}
                   </div>
@@ -770,7 +882,7 @@ function WavyTubeContent() {
                 {videos.filter(v=>v.channel===selectedChannelName).map(video=>(
                   <div key={video.id} className="wavy-video-card" onClick={()=>playVideo(video)}>
                     <div className="thumbnail-wrapper">
-                      {video.thumbnail ? <img src={video.thumbnail} alt={video.title}/> : <video src={`/api/video?id=${video.id}`} preload="metadata" muted playsInline/>}
+                      {video.thumbnail ? <img src={video.thumbnail} alt={video.title}/> : <div style={{width:'100%', height:'100%', background:'#222'}} />}
                     </div>
                     <div className="card-info">
                       <h3>{video.title}</h3>
@@ -784,7 +896,7 @@ function WavyTubeContent() {
 
           {activeTab === 'upload' && (
             <div className="upload-layout-box">
-              <h2>Загрузка видео (FFmpeg)</h2>
+              <h2>Загрузка видео (Продвинутое сжатие)</h2>
               {!currentChannel ? (
                 <div className="empty-state">
                   <span style={{fontSize:40}}>🎬</span>
@@ -805,6 +917,45 @@ function WavyTubeContent() {
                         </label>
                         <input type="text" placeholder="Название видеоролика" value={uploadTitle} onChange={e=>setUploadTitle(e.target.value)} required className="upload-input" />
                         <textarea placeholder="Описание" value={uploadDesc} onChange={e=>setUploadDesc(e.target.value)} rows={4} className="upload-input upload-textarea" />
+                        
+                        {/* ДОБАВЛЕНО: Расширенные настройки загрузки */}
+                        <div className="advanced-settings-box">
+                          <h4 style={{margin:'0 0 12px', fontSize:14, color:'#aaa'}}>Настройки сжатия</h4>
+                          <div className="setting-row">
+                            <label>Сила сжатия:</label>
+                            <select value={compressLevel} onChange={e => setCompressLevel(e.target.value)} className="upload-select">
+                              <option value="ultrafast">Слабая (Очень быстро)</option>
+                              <option value="veryfast">Средняя (Баланс)</option>
+                              <option value="fast">Сильная (Дольше)</option>
+                              <option value="medium">Максимальная (Экономия места)</option>
+                            </select>
+                          </div>
+                          <div className="setting-row">
+                            <label>Качество / Битрейт:</label>
+                            <select value={compressBitrate} onChange={e => {
+                                setCompressBitrate(e.target.value);
+                                setCompressAudio(e.target.value === '800k' ? '64k' : e.target.value === '2500k' ? '128k' : '192k');
+                            }} className="upload-select">
+                              <option value="800k">Минимальное (800k, мало весит)</option>
+                              <option value="2500k">Среднее (2500k)</option>
+                              <option value="4500k">Максимальное (4500k, HD)</option>
+                            </select>
+                          </div>
+                          <div className="setting-row">
+                            <label>Разрешение:</label>
+                            <select value={compressScale} onChange={e => setCompressScale(e.target.value)} className="upload-select" disabled={isShort}>
+                              <option value="-2:480">480p</option>
+                              <option value="-2:720">720p (HD)</option>
+                              <option value="-2:1080">1080p (Full HD)</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="trim-controls">
+                          <label>Обрезать с (сек): <input type="number" step="0.1" value={trimStart} onChange={e=>setTrimStart(e.target.value)} min="0" placeholder="0" /></label>
+                          <label>Обрезать до (сек): <input type="number" step="0.1" value={trimEnd} onChange={e=>setTrimEnd(e.target.value)} min="0" placeholder="Длительность" /></label>
+                        </div>
+
                         <div className="upload-playlist-block">
                           <label style={{fontSize:12,color:'#aaa',display:'block',marginBottom:8}}>Плейлист</label>
                           <select value={selectedPlaylist} onChange={e=>setSelectedPlaylist(e.target.value)} className="upload-select">
@@ -818,7 +969,7 @@ function WavyTubeContent() {
                         </div>
                         <label className="short-toggle">
                           <input type="checkbox" checked={isShort} onChange={e=>setIsShort(e.target.checked)} />
-                          <span>⚡ Формат Short</span>
+                          <span>⚡ Формат Short (Макс 10 мин, 720x1280)</span>
                         </label>
                       </div>
                       <div className="upload-right">
@@ -839,7 +990,13 @@ function WavyTubeContent() {
                       </div>
                     </div>
                     {isProcessing
-                      ? <div className="upload-processing"><div className="upload-spinner"/><p>{uploadStatus}</p><button type="button" onClick={()=>{abortControllerRef.current?.abort();setIsProcessing(false);}} className="btn-cancel-upload">Отменить</button></div>
+                      ? <div className="upload-processing">
+                          <div className="wavy-progress-bar">
+                             <div className="wavy-progress-fill" style={{width: `${ffmpegProgress}%`}}></div>
+                          </div>
+                          <p>{uploadStatus} {ffmpegProgress > 0 && ffmpegProgress < 100 ? `${ffmpegProgress}%` : ''}</p>
+                          <button type="button" onClick={()=>{abortControllerRef.current?.abort();setIsProcessing(false);}} className="btn-cancel-upload">Отменить</button>
+                        </div>
                       : <button type="submit" className="btn-publish">🚀 Оптимизировать и Опубликовать</button>
                     }
                   </form>
@@ -932,8 +1089,44 @@ function WavyTubeContent() {
         .search-box input:focus { border-color: rgba(0,120,212,0.5); background: rgba(255,255,255,0.08); }
         .clear-search { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); background: transparent; border: none; color: #888; font-size: 18px; cursor: pointer; }
         .user-profile-badge { display: flex; align-items: center; gap: 12px; font-size: 14px; font-weight: 500; color: #ccc; }
+        
+        .watch-layout { display: grid; grid-template-columns: 1fr 380px; gap: 24px; align-items: start; }
+        .watch-main-column { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+        .watch-side-column { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+
+        .recommendations-panel { background: var(--win25-panel-solid); border: 1px solid var(--win25-border); border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+        .recs-list { display: flex; flex-direction: column; gap: 12px; }
+        .rec-card { display: flex; gap: 12px; cursor: pointer; border-radius: 8px; transition: 0.2s; padding: 8px; }
+        .rec-card:hover { background: rgba(255,255,255,0.05); }
+        .rec-thumb { width: 140px; aspect-ratio: 16/9; background: #000; border-radius: 8px; overflow: hidden; position: relative; flex-shrink: 0; }
+        .rec-thumb.vertical { aspect-ratio: 9/16; width: 80px; }
+        .rec-thumb img, .rec-thumb video { width: 100%; height: 100%; object-fit: cover; }
+        .rec-info { flex: 1; display: flex; flex-direction: column; gap: 4px; overflow: hidden; }
+        .rec-info h4 { margin: 0; font-size: 14px; color: #fff; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .rec-info p { margin: 0; font-size: 12px; color: #aaa; }
+        .rec-info p.ch-link { cursor: pointer; color: #ccc; transition: 0.2s; }
+        .rec-info p.ch-link:hover { color: #fff; text-decoration: underline; }
+        .btn-view-playlist { background: rgba(0,120,212,0.15); color: #6ab4f5; border: 1px solid rgba(0,120,212,0.3); padding: 10px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; transition: 0.2s; }
+        .btn-view-playlist:hover { background: rgba(0,120,212,0.25); }
+        .playlist-view-header { display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid var(--win25-border); padding-bottom: 12px; }
+        .btn-back-recs { align-self: flex-start; background: transparent; border: none; color: #aaa; cursor: pointer; font-size: 13px; transition: 0.2s; }
+        .btn-back-recs:hover { color: #fff; }
+        .playlist-view-header h3 { margin: 0; font-size: 16px; }
+        .sort-toggles { display: flex; gap: 8px; }
+        .sort-toggles button { flex: 1; padding: 6px; background: rgba(255,255,255,0.05); border: 1px solid var(--win25-border); color: #ccc; border-radius: 6px; cursor: pointer; font-size: 12px; transition: 0.2s; }
+        .sort-toggles button.active { background: rgba(0,120,212,0.2); border-color: rgba(0,120,212,0.4); color: #fff; }
+
+        .trim-controls { display: flex; gap: 12px; margin-top: 12px; }
+        .trim-controls label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #aaa; flex: 1; }
+        .trim-controls input { background: rgba(0,0,0,0.4); border: 1px solid var(--win25-border); padding: 8px 12px; border-radius: 6px; color: #fff; width: 100%; outline: none; }
+        .trim-controls input:focus { border-color: var(--win25-accent); }
+
+        .advanced-settings-box { background: rgba(0,0,0,0.2); border: 1px solid var(--win25-border); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+        .setting-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #ccc; gap: 10px; }
+        .setting-row select { width: 60%; }
+
         .videos-compact-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 24px; margin-bottom: 40px; }
-        .wavy-video-card { background: rgba(255,255,255,0.02); border: 1px solid var(--win25-border); border-radius: 12px; overflow: hidden; cursor: pointer; transition: transform 0.2s, border 0.2s, box-shadow 0.2s; }
+        .wavy-video-card { background: rgba(255,255,255,0.02); border: 1px solid var(--win25-border); border-radius: 12px; overflow: hidden; cursor: pointer; transition: transform 0.2s, border 0.2s, box-shadow: 0.2s; }
         .wavy-video-card:hover { transform: translateY(-4px); border-color: rgba(255,255,255,0.15); box-shadow: 0 10px 20px rgba(0,0,0,0.3); }
         .thumbnail-wrapper { position: relative; aspect-ratio: 16/9; background: #121316; }
         .thumbnail-wrapper img, .thumbnail-wrapper video { width: 100%; height: 100%; object-fit: cover; position: absolute; top: 0; left: 0; }
@@ -942,14 +1135,9 @@ function WavyTubeContent() {
         .card-info h3 { margin: 0 0 6px 0; font-size: 15px; line-height: 1.4; color: #fff; }
         .card-channel { margin: 0 0 8px 0; font-size: 13px; color: var(--win25-text-dim); }
         .card-stats { display: flex; gap: 10px; font-size: 12px; color: #888; }
-        .playlist-section { margin-bottom: 40px; }
-        .playlist-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
-        .playlist-header h2 { margin: 0; font-size: 22px; color: #fff; }
-        .count-tag { font-size: 13px; color: var(--win25-text-dim); background: rgba(255,255,255,0.08); padding: 4px 10px; border-radius: 6px; font-weight: 500; }
         .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; height: 400px; color: #777; text-align: center; }
         .cta-upload-btn { background: var(--win25-accent); color: #fff; border: none; padding: 12px 28px; border-radius: 8px; cursor: pointer; font-size: 15px; font-weight: 600; transition: 0.2s; }
         .cta-upload-btn:hover { background: #0086f0; }
-        .watch-layout { display: grid; grid-template-columns: 1fr 340px; gap: 30px; }
         .video-player-frame { width: 100%; }
         .video-details-card { background: var(--win25-panel-solid); padding: 24px; border-radius: 16px; border: 1px solid var(--win25-border); display: flex; flex-direction: column; gap: 16px; }
         .details-header h1 { margin: 0 0 12px 0; font-size: 22px; line-height: 1.4; }
@@ -1079,6 +1267,14 @@ function WavyTubeContent() {
         .upload-image-input { font-size: 13px; color: #aaa; width: 100%; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px; border: 1px dashed rgba(255,255,255,0.1); cursor: pointer; }
         .upload-processing { background: rgba(0,0,0,0.5); border: 1px solid var(--win25-border); border-radius: 12px; padding: 24px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 16px; backdrop-filter: blur(10px); }
         .upload-processing p { margin: 0; color: #6ab4f5; font-weight: 600; font-size: 16px; }
+        
+        /* ДОБАВЛЕНО: Стили для прогресс-бара и настроек сжатия */
+        .wavy-progress-bar { width: 100%; height: 12px; background: rgba(255,255,255,0.1); border-radius: 6px; overflow: hidden; position: relative; }
+        .wavy-progress-fill { height: 100%; background: var(--win25-accent-gradient); transition: width 0.3s ease; }
+        .advanced-settings-box { background: rgba(0,0,0,0.2); border: 1px solid var(--win25-border); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
+        .setting-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #ccc; gap: 10px; }
+        .setting-row select { width: 60%; }
+
         .upload-spinner { width: 36px; height: 36px; border: 4px solid rgba(0,120,212,0.2); border-top-color: #0078d4; border-radius: 50%; animation: spin 0.8s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg) } }
         .btn-cancel-upload { background: rgba(232,17,35,0.1); color: #ff6b6b; border: 1px solid rgba(232,17,35,0.3); padding: 12px 24px; border-radius: 8px; cursor: pointer; width: 100%; font-weight: 600; font-size: 15px; transition: 0.2s; }
@@ -1097,6 +1293,10 @@ function WavyTubeContent() {
         ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.25); }
         .mobile-bottom-nav { display: none; }
 
+        @media (max-width: 1000px) {
+          .watch-layout { grid-template-columns: 1fr; }
+        }
+
         @media (max-width: 800px) {
           .desktop-only { display: none !important; }
           .desktop-only-text { display: none !important; }
@@ -1114,7 +1314,6 @@ function WavyTubeContent() {
           .user-profile-badge { margin-left: auto; }
           .wavy-main-content { padding-bottom: 60px; }
           .tab-container { padding: 16px; }
-          .watch-layout { grid-template-columns: 1fr; gap: 16px; }
           .upload-grid { grid-template-columns: 1fr; gap: 16px; }
           .videos-compact-grid { grid-template-columns: 1fr; gap: 16px; }
           .studio-table { min-width: 100%; }
