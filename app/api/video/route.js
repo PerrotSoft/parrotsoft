@@ -58,24 +58,3 @@ export async function GET(req) {
     return new NextResponse('Error streaming video: ' + err.message, { status: 500 });
   }
 }
-
-export async function POST(req) {
-  try {
-    const data = await req.formData();
-    const base64Video = data.get('base64');
-    const videoId = data.get('videoId');
-
-    if (!base64Video || !videoId) {
-      return NextResponse.json({ error: 'Не хватает данных.' }, { status: 400 });
-    }
-
-    await client.execute({
-      sql: "UPDATE wt_videos SET video_data = ? WHERE id = ?",
-      args: [base64Video, videoId]
-    });
-
-    return NextResponse.json({ success: true, id: videoId });
-  } catch (err) {
-    return NextResponse.json({ error: err.message }, { status: 500 });
-  }
-}

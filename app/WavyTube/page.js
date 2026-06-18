@@ -551,7 +551,8 @@ async function uploadVideoInChunks(file, videoId) {
           fd.append('base64', base64Video);
           fd.append('videoId', videoId);
           
-          uploadVideoInChunks(fastStartBlob, videoId);
+          await uploadVideoInChunks(fastStartBlob, videoId);
+
           setUploadStatus('✅ Опубликовано!');
           setTimeout(() => {
             setUploadTitle(''); setUploadDesc(''); setSelectedFile(null);
