@@ -426,22 +426,26 @@ async function uploadVideoInChunks(file, videoId) {
   for (let i = 0; i < totalChunks; i++) {
     const start = i * CHUNK_SIZE;
     const blob = file.slice(start, start + CHUNK_SIZE);
-    
-    // Превращаем только этот кусок в Base64
+
     const chunkBase64 = await new Promise((resolve) => {
       const reader = new FileReader();
       reader.onloadend = () => resolve(reader.result);
       reader.readAsDataURL(blob);
     });
 
-    // Отправляем кусочек и ждем ответа (await)
-    const response = await fetch('/api/upload', { // убедитесь, что путь верный
+    // Убираем data:-префикс И паддинг '=' — он ломает конкатенацию base64
+    const cleanChunk = chunkBase64
+      .replace(/^data:[^;]+;base64,/, '')
+      .replace(/=+$/, '');  // ← КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ
+
+    const response = await fetch('/api/video', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        chunk: chunkBase64.replace(/^data:video\/\w+;base64,/, ""),
+        chunk: cleanChunk,
         videoId: videoId,
-        isFirst: i === 0
+        isFirst: i === 0,
+        isLast: i === totalChunks - 1,   // ← сигнал для финального паддинга
       })
     });
 
