@@ -2,13 +2,12 @@ import { createClient } from '@libsql/client';
 import { NextResponse } from 'next/server';
 
 export const runtime = 'nodejs';
-export const maxDuration = 60;
 export const dynamic = 'force-dynamic';
 
 function getClient() {
   return createClient({
-    url: process.env.TURSO_DATABASE_URL,
-    authToken: process.env.TURSO_AUTH_TOKEN,
+    url: process.env.TURSO_DATABASE_URL || "libsql://parrotsoft-vercel-icfg-i713yoki8d1eytlkyrwlsfzr.aws-us-east-1.turso.io",
+    authToken: process.env.TURSO_AUTH_TOKEN || "eyJhbGciOiJFZERTQSIsInR5cCI6IkpXVCJ9.eyJpYXQiOjE3NzEzNjM2NjIsImlkIjoiN2YyYTY2MDgtYWZjOC00MTQ1LWFlNmYtZDljMDhkZGRhZWE3IiwicmlkIjoiZDU5ZjM3ZTYtZGE5YS00YTA2LTk4OWYtMTBhYTRjNWFmOTViIn0.V6NDZo1wMJNNs5ipc40YkuTCXqG4DwijLBkqtDbr-6_uJa1xCJvHPOvE3jeK2UOfTBtc-cD8SZ0s3tqALRuABA",
   });
 }
 
@@ -63,53 +62,28 @@ export async function GET(req) {
   }
 }
 
-// ─── POST: загрузка чанков ──────────────────────────────────────────────────
+// ─── POST: поэтапная загрузка кусков (чанков) ──────────────────────────────
 export async function POST(req) {
   const client = getClient();
   try {
-    let body;
-    try {
-      body = await req.json();
-    } catch (parseErr) {
-      return NextResponse.json({ error: 'Невалидный JSON: ' + parseErr.message }, { status: 400 });
-    }
-
-    const { chunk, videoId, isFirst, isLast } = body;
+    const body = await req.json();
+    const { chunk, videoId, isFirst } = body;
 
     if (!chunk || !videoId) {
       return NextResponse.json({ error: 'Отсутствуют chunk или videoId' }, { status: 400 });
     }
 
-    // Убираем data:-префикс и паддинг — он ломает конкатенацию base64
-    const cleanChunk = chunk
-      .replace(/^data:[^;]+;base64,/, '')
-      .replace(/=+$/, '');
-
     if (isFirst) {
-      // Строка уже создана saveVideoMetadata — просто перезаписываем video_data
+      // Это первый кусок: перезаписываем ячейку video_data
       await client.execute({
         sql: "UPDATE wt_videos SET video_data = ? WHERE id = ?",
-        args: [cleanChunk, videoId],
+        args: [chunk, videoId],
       });
     } else {
-      // Дописываем чанк к существующим данным
+      // Это следующие куски: дописываем их к текущим данным
       await client.execute({
         sql: "UPDATE wt_videos SET video_data = video_data || ? WHERE id = ?",
-        args: [cleanChunk, videoId],
-      });
-    }
-
-    // Последний чанк: восстанавливаем base64-паддинг
-    if (isLast) {
-      await client.execute({
-        sql: `UPDATE wt_videos SET video_data = video_data ||
-              CASE (LENGTH(video_data) % 4)
-                WHEN 2 THEN '=='
-                WHEN 3 THEN '='
-                ELSE ''
-              END
-              WHERE id = ?`,
-        args: [videoId],
+        args: [chunk, videoId],
       });
     }
 

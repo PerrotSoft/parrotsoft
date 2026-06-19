@@ -6,6 +6,9 @@ const nextConfig = {
     },
   },
   async headers() {
+    return [];
+  },
+  async headers() {
     return [
       {
         source: '/(.*)',

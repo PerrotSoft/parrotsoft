@@ -24,8 +24,7 @@ function ShortsPlayer({ short, isActive, isNear }) {
       video.pause(); video.src = ''; video.load();
     }
   }, [isActive, isNear, short.id]);
-  // ДОБАВЛЕНО: controls={true} для паузы, перемотки и звука в шортсах
-  return <video ref={videoRef} controls loop playsInline muted={!isActive} className="short-native-video" />;
+  return <video ref={videoRef} controls loop playsInline muted={!isActive} preload="metadata" className="short-native-video" />;
 }
 
 function CommentsPopup({ video, currentChannel, onClose }) {
@@ -170,69 +169,6 @@ function CreateChannelPopup({ accountId, accountKey, currentCount, onCreated, on
   );
 }
 
-function RecommendationSystemg({ videos, currentVideo, onPlay, onSelectChannel }) {
-  const playlistName = currentVideo?.playlist;
-  const [viewMode, setViewMode] = useState('recommendations');
-  const [playlistSort, setPlaylistSort] = useState('recommended');
-
-  const recs = [...videos].filter(v => v.id !== currentVideo.id).map(v => {
-     let score = 0;
-     if (v.channel === currentVideo.channel) score += 5;
-     if (v.playlist === currentVideo.playlist && v.playlist !== 'Общее' && v.playlist) score += 10;
-     score += (v.views || 0) * 0.1;
-     score += (v.likes || 0) * 0.5;
-     const ageDays = (Date.now() - (v.timestamp || 0)) / (1000 * 3600 * 24);
-     score -= ageDays * 0.1;
-     return { ...v, score };
-  }).sort((a,b) => b.score - a.score);
-
-  const playlistVideos = playlistName && playlistName !== 'Общее' ? videos.filter(v => v.playlist === playlistName) : [];
-
-  const sortedPlaylist = [...playlistVideos].sort((a,b) => {
-     if (playlistSort === 'sequential') return (a.timestamp || 0) - (b.timestamp || 0);
-     const scoreA = ((a.views||0)*0.1) + ((a.likes||0)*0.5);
-     const scoreB = ((b.views||0)*0.1) + ((b.likes||0)*0.5);
-     return scoreB - scoreA;
-  });
-
-  return (
-     <div className="recommendations-panel">
-        {playlistVideos.length > 0 && viewMode === 'recommendations' && (
-           <button className="btn-view-playlist" onClick={() => setViewMode('playlist')}>
-              📁 Посмотреть плейлист: {playlistName} ({playlistVideos.length})
-           </button>
-        )}
-
-        {viewMode === 'playlist' && (
-           <div className="playlist-view-header">
-              <button className="btn-back-recs" onClick={() => setViewMode('recommendations')}>← Назад к рекомендациям</button>
-              <h3>Плейлист: {playlistName}</h3>
-              <div className="sort-toggles">
-                 <button className={playlistSort === 'sequential' ? 'active' : ''} onClick={()=>setPlaylistSort('sequential')}>По порядку</button>
-                 <button className={playlistSort === 'recommended' ? 'active' : ''} onClick={()=>setPlaylistSort('recommended')}>По рекомендации</button>
-              </div>
-           </div>
-        )}
-
-        <div className="recs-list">
-           {(viewMode === 'playlist' ? sortedPlaylist : recs).map(v => (
-              <div key={v.id} className="rec-card" onClick={() => onPlay(v)}>
-                 <div className={`rec-thumb ${v.is_short ? 'vertical' : ''}`}>
-                    {v.thumbnail ? <img src={v.thumbnail} alt={v.title} /> : <div style={{width:'100%', height:'100%', background:'#222'}} />}
-                    {v.is_short && <span className="duration-tag">⚡ Short</span>}
-                 </div>
-                 <div className="rec-info">
-                    <h4>{v.title}</h4>
-                    <p className="ch-link" onClick={(e) => { e.stopPropagation(); onSelectChannel(v.channel); }}>@{v.channel}</p>
-                    <p>👁 {v.views||0} • {new Date(v.timestamp||Date.now()).toLocaleDateString()}</p>
-                 </div>
-              </div>
-           ))}
-        </div>
-     </div>
-  );
-}
-
 function WavyTubeContent() {
   const searchParams = useSearchParams();
 
@@ -271,7 +207,6 @@ function WavyTubeContent() {
   const [trimStart, setTrimStart] = useState('');
   const [trimEnd, setTrimEnd] = useState('');
   
-  // ДОБАВЛЕНО: Расширенные настройки сжатия
   const [compressLevel, setCompressLevel] = useState('veryfast');
   const [compressBitrate, setCompressBitrate] = useState('2500k');
   const [compressAudio, setCompressAudio] = useState('128k');
@@ -286,6 +221,7 @@ function WavyTubeContent() {
 
   const [activeShortsIndex, setActiveShortsIndex] = useState(0);
   const shortsRefs = useRef([]);
+  const lastFetchRef = useRef(0);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -294,7 +230,7 @@ function WavyTubeContent() {
     setAccountId(pUser);
     setAccountKey(pToken);
     loadMyChannels(pUser, pToken);
-    loadContent();
+    loadContent(true);
   }, []);
 
   const loadMyChannels = async (accId, accKey) => {
@@ -321,6 +257,12 @@ function WavyTubeContent() {
   };
 
   useEffect(() => {
+    if (activeTab === 'home' || activeTab === 'shorts' || activeTab === 'channel-view') {
+      loadContent(false);
+    }
+  }, [activeTab]);
+
+  useEffect(() => {
     if (activeTab !== 'shorts') return;
     const observer = new IntersectionObserver(entries => {
       entries.forEach(entry => { if (entry.isIntersecting) setActiveShortsIndex(Number(entry.target.dataset.idx)); });
@@ -335,8 +277,16 @@ function WavyTubeContent() {
     if (lists) setPlaylists(lists);
   };
 
-  const loadContent = async () => {
-    try { setVideos((await actions.getVideos()) || []); } catch(e) { console.error(e); }
+  const loadContent = async (force = false) => {
+    const now = Date.now();
+    if (!force && now - lastFetchRef.current < 30000) return;
+    try { 
+      const res = await actions.getVideos();
+      if (res) {
+        setVideos(res);
+        lastFetchRef.current = Date.now();
+      }
+    } catch(e) { console.error(e); }
   };
 
   const switchChannel = (ch) => {
@@ -419,48 +369,7 @@ function WavyTubeContent() {
     setNewPlaylistName('');
     loadPlaylists(currentChannel.username);
   };
-async function uploadVideoInChunks(file, videoId) {
-  const CHUNK_SIZE = 512 * 1024; // 512 КБ — безопасный размер с учётом base64-оверхеда
-  const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
 
-  for (let i = 0; i < totalChunks; i++) {
-    const start = i * CHUNK_SIZE;
-    const blob = file.slice(start, start + CHUNK_SIZE);
-
-    const chunkBase64 = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onloadend = () => resolve(reader.result);
-      reader.onerror = () => reject(new Error('FileReader error'));
-      reader.readAsDataURL(blob);
-    });
-
-    // Убираем data:-префикс и паддинг '=' — он ломает конкатенацию base64
-    const cleanChunk = chunkBase64
-      .replace(/^data:[^;]+;base64,/, '')
-      .replace(/=+$/, '');
-
-    const isFirst = i === 0;
-    const isLast = i === totalChunks - 1;
-
-    const response = await fetch('/api/video', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chunk: cleanChunk,
-        videoId,
-        isFirst,
-        isLast,
-      }),
-    });
-
-    if (!response.ok) {
-      const errText = await response.text();
-      throw new Error(`Чанк ${i + 1}/${totalChunks} не загружен: ${errText}`);
-    }
-
-    console.log(`Кусок ${i + 1}/${totalChunks} отправлен`);
-  }
-}
   const handleFastUpload = async (e) => {
     e.preventDefault();
     if (!selectedFile) { alert("Выберите видеофайл!"); return; }
@@ -507,11 +416,11 @@ async function uploadVideoInChunks(file, videoId) {
         }
         args.push('-vf', 'scale=720:1280:force_original_aspect_ratio=decrease,pad=720:1280:(ow-iw)/2:(oh-ih)/2');
       } else {
-        // ИСПРАВЛЕНО: Добавлен префикс "scale="
         args.push('-vf', `scale=${compressScale}`);
       }
 
       args.push(
+        '-threads', '0',
         '-c:v', 'libx264',
         '-b:v', compressBitrate,
         '-preset', compressLevel,
@@ -521,24 +430,22 @@ async function uploadVideoInChunks(file, videoId) {
         'output.mp4'
       );
 
-      // ДОБАВЛЕНО: Проверка на краш FFmpeg
       const exitCode = await ffmpeg.exec(args);
       if (exitCode !== 0) {
         throw new Error("FFmpeg вылетел с ошибкой. Попробуйте выбрать другие настройки разрешения или сжатия.");
       }
 
-      setUploadStatus('Обработка завершена! Чтение оптимизированного видео...');
+      setUploadStatus('Обработка завершена! Подготовка видео...');
       const data = await ffmpeg.readFile('output.mp4');
       const fastStartBlob = new Blob([data.buffer], { type: 'video/mp4' });
 
       const maxSize = isShort ? 35 * 1024 * 1024 : 200 * 1024 * 1024;
       if (fastStartBlob.size > maxSize) {
-        alert(`Итоговое видео слишком большое (${(fastStartBlob.size / 1024 / 1024).toFixed(2)} МБ)! Лимит для ${isShort ? 'Shorts — 35 МБ' : 'видео — 200 МБ'}. Попробуйте усилить сжатие или уменьшить битрейт.`);
+        alert(`Итоговое видео слишком большое (${(fastStartBlob.size / 1024 / 1024).toFixed(2)} МБ)! Лимит для ${isShort ? 'Shorts — 35 МБ' : 'видео — 200 МБ'}.`);
         setIsProcessing(false);
         return;
       }
 
-      setUploadStatus('Кодирование для отправки на сервер...');
       const reader = new FileReader();
       reader.readAsDataURL(fastStartBlob);
       reader.onloadend = async () => {
@@ -557,20 +464,40 @@ async function uploadVideoInChunks(file, videoId) {
             is_short: isShort, duration: videoDuration,
           }, { tags: '', audience_type: 'general' });
 
-          setUploadStatus('Отправка медиафайла на сервер...');
-          setFfmpegProgress(100);
-          const fd = new FormData();
-          fd.append('base64', base64Video);
-          fd.append('videoId', videoId);
+          setUploadStatus('Начало загрузки сегментов...');
           
-          await uploadVideoInChunks(fastStartBlob, videoId);
+          const cleanBase64 = base64Video.replace(/^data:[^;]+;base64,/, '');
+          const CHUNK_SIZE = 1024 * 512;
+          const totalChunks = Math.ceil(cleanBase64.length / CHUNK_SIZE);
+
+          for (let i = 0; i < totalChunks; i++) {
+            setUploadStatus(`Отправка части ${i + 1} из ${totalChunks}...`);
+            setFfmpegProgress(Math.round(((i + 1) / totalChunks) * 100));
+            
+            const chunk = cleanBase64.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+            
+            const response = await fetch('/api/video', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                chunk: chunk,
+                videoId: videoId,
+                isFirst: i === 0
+              }),
+              signal: abortControllerRef.current.signal
+            });
+
+            if (!response.ok) {
+              throw new Error(`Сервер отклонил кусок видео #${i + 1}`);
+            }
+          }
 
           setUploadStatus('✅ Опубликовано!');
           setTimeout(() => {
             setUploadTitle(''); setUploadDesc(''); setSelectedFile(null);
             setLocalVideoUrl(null); setThumbDataUrl(null); setIsProcessing(false);
             setTrimStart(''); setTrimEnd(''); setFfmpegProgress(0);
-            loadContent(); setActiveTab('home');
+            loadContent(true); setActiveTab('home');
           }, 1500);
         } catch (err) {
           alert('Сбой: ' + err.message); setIsProcessing(false);
@@ -586,7 +513,7 @@ async function uploadVideoInChunks(file, videoId) {
     if (!confirm('Удалить это видео?') || !currentChannel) return;
     const res = await actions.deleteVideoSecure(id, currentChannel.username, accountId, accountKey);
     if (res?.error === 'access_denied') { alert('Нет прав!'); return; }
-    loadContent();
+    loadContent(true);
   };
 
   const openDeepAnalytics = async (video) => {
@@ -630,7 +557,7 @@ async function uploadVideoInChunks(file, videoId) {
       <aside className={`wavy-sidebar ${mobileMenuOpen ? 'open' : ''}`}>
         <div className="sidebar-header-row">
           <div className="brand" onClick={() => { setActiveTab('home'); setActiveVideo(null); setMobileMenuOpen(false); }}>
-            <h2>WavyTube <span>v20.2</span></h2>
+            <h2>WavyTube <span>v20.3</span></h2>
           </div>
           <button className="mobile-close-btn" onClick={() => setMobileMenuOpen(false)}>✕</button>
         </div>
@@ -778,7 +705,7 @@ async function uploadVideoInChunks(file, videoId) {
                   {filteredVideos.map(video => (
                     <div key={video.id} className="wavy-video-card" onClick={() => playVideo(video)}>
                       <div className="thumbnail-wrapper">
-                        {video.thumbnail ? <img src={video.thumbnail} alt={video.title} /> : <div style={{width:'100%', height:'100%', background:'#222'}} />}
+                        {video.thumbnail ? <img src={video.thumbnail} alt={video.title} /> : <video src={`/api/video?id=${video.id}`} preload="metadata" muted playsInline style={{width:'100%', height:'100%', objectFit:'cover', position:'absolute'}} />}
                         <span className="duration-tag">{video.is_short ? '⚡ Short' : 'HD'}</span>
                       </div>
                       <div className="card-info">
@@ -958,7 +885,6 @@ async function uploadVideoInChunks(file, videoId) {
                         <input type="text" placeholder="Название видеоролика" value={uploadTitle} onChange={e=>setUploadTitle(e.target.value)} required className="upload-input" />
                         <textarea placeholder="Описание" value={uploadDesc} onChange={e=>setUploadDesc(e.target.value)} rows={4} className="upload-input upload-textarea" />
                         
-                        {/* ДОБАВЛЕНО: Расширенные настройки загрузки */}
                         <div className="advanced-settings-box">
                           <h4 style={{margin:'0 0 12px', fontSize:14, color:'#aaa'}}>Настройки сжатия</h4>
                           <div className="setting-row">
@@ -1166,7 +1092,7 @@ async function uploadVideoInChunks(file, videoId) {
         .setting-row select { width: 60%; }
 
         .videos-compact-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 24px; margin-bottom: 40px; }
-        .wavy-video-card { background: rgba(255,255,255,0.02); border: 1px solid var(--win25-border); border-radius: 12px; overflow: hidden; cursor: pointer; transition: transform 0.2s, border 0.2s, box-shadow: 0.2s; }
+        .wavy-video-card { background: rgba(255,255,255,0.02); border: 1px solid var(--win25-border); border-radius: 12px; overflow: hidden; cursor: pointer; transition: transform 0.2s, border 0.2s, box-shadow 0.2s; }
         .wavy-video-card:hover { transform: translateY(-4px); border-color: rgba(255,255,255,0.15); box-shadow: 0 10px 20px rgba(0,0,0,0.3); }
         .thumbnail-wrapper { position: relative; aspect-ratio: 16/9; background: #121316; }
         .thumbnail-wrapper img, .thumbnail-wrapper video { width: 100%; height: 100%; object-fit: cover; position: absolute; top: 0; left: 0; }
@@ -1308,7 +1234,6 @@ async function uploadVideoInChunks(file, videoId) {
         .upload-processing { background: rgba(0,0,0,0.5); border: 1px solid var(--win25-border); border-radius: 12px; padding: 24px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 16px; backdrop-filter: blur(10px); }
         .upload-processing p { margin: 0; color: #6ab4f5; font-weight: 600; font-size: 16px; }
         
-        /* ДОБАВЛЕНО: Стили для прогресс-бара и настроек сжатия */
         .wavy-progress-bar { width: 100%; height: 12px; background: rgba(255,255,255,0.1); border-radius: 6px; overflow: hidden; position: relative; }
         .wavy-progress-fill { height: 100%; background: var(--win25-accent-gradient); transition: width 0.3s ease; }
         .advanced-settings-box { background: rgba(0,0,0,0.2); border: 1px solid var(--win25-border); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; margin-top: 12px; }
