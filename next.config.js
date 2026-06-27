@@ -5,6 +5,13 @@ const nextConfig = {
       bodySizeLimit: '500mb',
     },
   },
+  experimental: {
+    serverActions: true,
+    serverActions: {
+      bodySizeLimit: '10mb',
+    },
+  },
+  // Увеличиваем лимит тела для API routes
   async headers() {
     return [];
   },

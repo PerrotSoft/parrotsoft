@@ -29,7 +29,5 @@
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1",
     "server-only": "^0.0.1"
-  },
-  "main": "next.config.js",
-  "devDependencies": {}
+  }
 }

@@ -1000,3 +1000,569 @@ export async function deleteVideoSecure(videoId, channelUsername, accountId, acc
   await client.execute({ sql: "DELETE FROM wt_telemetry WHERE video_id = ?", args: [videoId] });
   return { success: true };
 }
+
+
+
+
+
+
+
+
+
+
+
+
+// ── КОНФИГ (дефолтные значения — замени здесь) ────────────────────────────
+const ADS_CONFIG = {
+  DEV_ACCOUNT_COST: 10,       // Pey Coins за аккаунт разработчика
+  MIN_WITHDRAWAL:   10,       // Минимальная сумма вывода
+  MAX_SITES:        10,       // Макс. сайтов у одного разработчика
+  DEFAULT_CPV:      0.5,      // Дефолтная цена за просмотр
+  FALLBACK_BANNER:  'https://via.placeholder.com/468x60?text=FireSoft+Ads', // Заглушка
+  FALLBACK_VIDEO:   'https://www.w3schools.com/html/mov_bbb.mp4',           // Заглушка
+};
+// ─────────────────────────────────────────────────────────────────────────
+
+// Инициализация расширенных таблиц рекламной системы
+export async function initAdsDBFull() {
+  'use server';
+  await initAdsDB(); // базовая инициализация из оригинального actions.js
+  
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS fa_sites (
+      id TEXT PRIMARY KEY,
+      owner_id TEXT,
+      name TEXT,
+      url TEXT,
+      description TEXT,
+      status TEXT DEFAULT 'active',
+      total_views INTEGER DEFAULT 0,
+      total_earned REAL DEFAULT 0,
+      timestamp INTEGER
+    )
+  `);
+  
+  // Добавляем флаг разработчика в таблицу пользователей (идемпотентно)
+  try {
+    await client.execute(`ALTER TABLE users ADD COLUMN is_dev INTEGER DEFAULT 0`);
+  } catch (_) { /* уже есть */ }
+  
+  // Добавляем initial_budget в fa_ads для отображения расходов
+  try {
+    await client.execute(`ALTER TABLE fa_ads ADD COLUMN initial_budget REAL DEFAULT 0`);
+  } catch (_) { /* уже есть */ }
+}
+
+// ── Полная статистика кампании ─────────────────────────────────────────────
+export async function getAdCampaignStats(ownerId) {
+  'use server';
+  await initAdsDBFull();
+  const rs = await client.execute({
+    sql: `SELECT id, title, type, content_url, target_url, budget, initial_budget,
+                 cost_per_view, status, timestamp
+          FROM fa_ads WHERE owner_id = ? ORDER BY timestamp DESC`,
+    args: [String(ownerId)],
+  });
+  return toPlain(rs.rows).map(r => ({
+    ...r,
+    budget:          Number(r.budget || 0),
+    initial_budget:  Number(r.initial_budget || r.budget || 0),
+    cost_per_view:   Number(r.cost_per_view || 0),
+    spent:           Number(r.initial_budget || 0) - Number(r.budget || 0),
+    est_views:       Math.floor(Number(r.budget || 0) / Number(r.cost_per_view || 1)),
+  }));
+}
+
+// ── Создание кампании с initial_budget ────────────────────────────────────
+export async function createAdCampaignFull(ownerId, title, type, contentUrl, targetUrl, budget, cpv) {
+  'use server';
+  await initAdsDBFull();
+  
+  const userData = await getRawUserData(ownerId);
+  const currentBalance = Number(userData.balance || 0);
+  const totalBudget = Number(budget);
+  const costPerView = Number(cpv || ADS_CONFIG.DEFAULT_CPV);
+
+  if (currentBalance < totalBudget) {
+    return { success: false, error: 'Недостаточно Pey Coins на балансе' };
+  }
+  if (totalBudget < costPerView) {
+    return { success: false, error: 'Бюджет не может быть меньше CPV' };
+  }
+
+  userData.balance = currentBalance - totalBudget;
+  await client.execute({
+    sql: "UPDATE users SET data = ? WHERE username = ?",
+    args: [JSON.stringify(userData), String(ownerId)],
+  });
+
+  const adId = 'ad_' + Math.random().toString(36).substring(2, 11);
+  await client.execute({
+    sql: `INSERT INTO fa_ads 
+            (id, owner_id, title, type, content_url, target_url, budget, initial_budget, cost_per_view, status, timestamp) 
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)`,
+    args: [adId, ownerId, title, type, contentUrl, targetUrl, totalBudget, totalBudget, costPerView, Date.now()],
+  });
+
+  return { success: true, adId };
+}
+
+// ── Изменение статуса кампании ─────────────────────────────────────────────
+export async function setAdStatus(adId, ownerId, newStatus) {
+  'use server';
+  const check = await client.execute({
+    sql: 'SELECT owner_id, budget, cost_per_view FROM fa_ads WHERE id = ?',
+    args: [adId],
+  });
+  if (check.rows.length === 0) return { error: 'not_found' };
+  if (String(check.rows[0].owner_id) !== String(ownerId)) return { error: 'access_denied' };
+
+  // При возобновлении проверяем что есть бюджет
+  if (newStatus === 'active') {
+    const ad = check.rows[0];
+    if (Number(ad.budget) < Number(ad.cost_per_view)) {
+      return { error: 'budget_too_low' };
+    }
+  }
+
+  await client.execute({
+    sql: 'UPDATE fa_ads SET status = ? WHERE id = ?',
+    args: [newStatus, adId],
+  });
+  return { success: true };
+}
+
+// ── Активация аккаунта разработчика ───────────────────────────────────────
+export async function activateDevAccount(username) {
+  'use server';
+  await initAdsDBFull();
+  
+  // Уже активирован?
+  const isDevRow = await client.execute({
+    sql: 'SELECT is_dev FROM users WHERE username = ?',
+    args: [username],
+  });
+  if (Number(isDevRow.rows[0]?.is_dev) === 1) {
+    return { success: false, error: 'already_activated' };
+  }
+
+  const userData = await getRawUserData(username);
+  const balance = Number(userData.balance || 0);
+  const cost = ADS_CONFIG.DEV_ACCOUNT_COST;
+
+  if (balance < cost) {
+    return { success: false, error: `Нужно ${cost} pc, у тебя ${balance} pc` };
+  }
+
+  userData.balance = balance - cost;
+  await client.execute({
+    sql: 'UPDATE users SET data = ?, is_dev = 1 WHERE username = ?',
+    args: [JSON.stringify(userData), String(username)],
+  });
+
+  return { success: true, newBalance: userData.balance };
+}
+
+// ── Проверка статуса разработчика ─────────────────────────────────────────
+export async function isDevAccount(username) {
+  'use server';
+  try {
+    await initAdsDBFull();
+    const rs = await client.execute({
+      sql: 'SELECT is_dev FROM users WHERE username = ?',
+      args: [String(username)],
+    });
+    return Boolean(Number(rs.rows[0]?.is_dev || 0));
+  } catch (_) {
+    return false;
+  }
+}
+
+// ── Регистрация сайта ──────────────────────────────────────────────────────
+export async function registerDevSite(username, name, url, description) {
+  'use server';
+  await initAdsDBFull();
+  
+  const isDev = await isDevAccount(username);
+  if (!isDev) return { error: 'not_dev_account' };
+
+  const countR = await client.execute({
+    sql: 'SELECT COUNT(*) as cnt FROM fa_sites WHERE owner_id = ?',
+    args: [String(username)],
+  });
+  if (Number(countR.rows[0]?.cnt) >= ADS_CONFIG.MAX_SITES) {
+    return { error: `Лимит ${ADS_CONFIG.MAX_SITES} сайтов достигнут` };
+  }
+
+  const siteId = 'site_' + Math.random().toString(36).substring(2, 11);
+  await client.execute({
+    sql: 'INSERT INTO fa_sites (id, owner_id, name, url, description, timestamp) VALUES (?, ?, ?, ?, ?, ?)',
+    args: [siteId, String(username), name.trim(), url.trim(), description?.trim() || '', Date.now()],
+  });
+  return { success: true, siteId };
+}
+
+// ── Получить сайты разработчика ────────────────────────────────────────────
+export async function getDevSites(username) {
+  'use server';
+  await initAdsDBFull();
+  const rs = await client.execute({
+    sql: 'SELECT * FROM fa_sites WHERE owner_id = ? ORDER BY timestamp DESC',
+    args: [String(username)],
+  });
+  return toPlain(rs.rows).map(r => ({
+    ...r,
+    total_views:  Number(r.total_views || 0),
+    total_earned: Number(r.total_earned || 0),
+  }));
+}
+
+// ── Удалить сайт ────────────────────────────────────────────────────────────
+export async function deleteDevSite(username, siteId) {
+  'use server';
+  const check = await client.execute({
+    sql: 'SELECT owner_id FROM fa_sites WHERE id = ?',
+    args: [siteId],
+  });
+  if (check.rows.length === 0) return { error: 'not_found' };
+  if (String(check.rows[0].owner_id) !== String(username)) return { error: 'access_denied' };
+  await client.execute({ sql: 'DELETE FROM fa_sites WHERE id = ?', args: [siteId] });
+  return { success: true };
+}
+
+// ── Ротатор рекламы с типом ─────────────────────────────────────────────────
+export async function getAdForPlacementFull(type, devUsername, siteId) {
+  'use server';
+  await initAdsDBFull();
+  
+  const rs = await client.execute({
+    sql: "SELECT * FROM fa_ads WHERE type = ? AND status = 'active' AND budget >= cost_per_view ORDER BY RANDOM() LIMIT 1",
+    args: [type],
+  });
+
+  if (rs.rows.length === 0) {
+    // Фоллбэк реклама
+    return {
+      isFallback: true,
+      id: 'fallback',
+      type,
+      content_url: type === 'video' ? ADS_CONFIG.FALLBACK_VIDEO : ADS_CONFIG.FALLBACK_BANNER,
+      target_url: 'https://parrotsoft.vercel.app',
+    };
+  }
+
+  const ad = toPlain(rs.rows)[0];
+  
+  // Засчитываем показ автоматически если переданы данные разработчика
+  if (devUsername && siteId) {
+    await logAdImpressionFull(ad.id, devUsername, siteId);
+  }
+
+  return ad;
+}
+
+// ── Биллинг просмотра с обновлением статистики сайта ──────────────────────
+export async function logAdImpressionFull(adId, devUsername, siteId) {
+  'use server';
+  if (!adId || adId === 'fallback') return { success: true };
+  await initAdsDBFull();
+
+  const adRs = await client.execute({
+    sql: 'SELECT budget, cost_per_view FROM fa_ads WHERE id = ?',
+    args: [adId],
+  });
+  if (adRs.rows.length === 0) return { error: 'ad_not_found' };
+
+  const ad = adRs.rows[0];
+  const cost = Number(ad.cost_per_view);
+
+  if (Number(ad.budget) < cost) {
+    await client.execute({ sql: "UPDATE fa_ads SET status = 'ended' WHERE id = ?", args: [adId] });
+    return { error: 'budget_ended' };
+  }
+
+  // Списываем с бюджета кампании
+  await client.execute({
+    sql: 'UPDATE fa_ads SET budget = budget - ? WHERE id = ?',
+    args: [cost, adId],
+  });
+
+  // Начисляем разработчику
+  if (devUsername) {
+    const devData = await getRawUserData(devUsername);
+    devData.balance = Number(devData.balance || 0) + cost;
+    await client.execute({
+      sql: 'UPDATE users SET data = ? WHERE username = ?',
+      args: [JSON.stringify(devData), String(devUsername)],
+    });
+  }
+
+  // Обновляем статистику сайта
+  if (siteId) {
+    await client.execute({
+      sql: 'UPDATE fa_sites SET total_views = total_views + 1, total_earned = total_earned + ? WHERE id = ?',
+      args: [cost, siteId],
+    });
+  }
+
+  return { success: true };
+}
+
+// ── Вывод средств разработчика ─────────────────────────────────────────────
+export async function requestAdWithdrawalFull(devId, amount, method, details) {
+  'use server';
+  await initAdsDBFull();
+  
+  const reqAmount = Number(amount);
+  if (reqAmount < ADS_CONFIG.MIN_WITHDRAWAL) {
+    return { success: false, error: `Минимум для вывода: ${ADS_CONFIG.MIN_WITHDRAWAL} pc` };
+  }
+
+  const userData = await getRawUserData(devId);
+  const currentBalance = Number(userData.balance || 0);
+
+  if (currentBalance < reqAmount) {
+    return { success: false, error: `Недостаточно средств. Баланс: ${currentBalance} pc` };
+  }
+
+  // Замораживаем средства
+  userData.balance = currentBalance - reqAmount;
+  await client.execute({
+    sql: 'UPDATE users SET data = ? WHERE username = ?',
+    args: [JSON.stringify(userData), String(devId)],
+  });
+
+  const withdrawalId = 'with_' + Math.random().toString(36).substring(2, 11);
+  await client.execute({
+    sql: `INSERT INTO fa_withdrawals (id, dev_id, amount, method, details, status, timestamp) 
+          VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
+    args: [withdrawalId, devId, reqAmount, method, details, Date.now()],
+  });
+
+  return { success: true, withdrawalId, newBalance: userData.balance };
+}
+
+// ── История выводов ─────────────────────────────────────────────────────────
+export async function getWithdrawalHistory(devId) {
+  'use server';
+  await initAdsDBFull();
+  const rs = await client.execute({
+    sql: 'SELECT * FROM fa_withdrawals WHERE dev_id = ? ORDER BY timestamp DESC',
+    args: [String(devId)],
+  });
+  return toPlain(rs.rows).map(r => ({ ...r, amount: Number(r.amount) }));
+}
+
+// ── Баланс пользователя ────────────────────────────────────────────────────
+export async function getUserBalance(username) {
+  'use server';
+  const userRes = await client.execute({
+      sql: "SELECT data FROM users WHERE username = ?",
+      args: [name]
+    });
+
+    if (userRes.rows.length > 0) {
+      let userData = JSON.parse(userRes.rows[0].data);
+      const currentBalance = Number(userData.balance) || 0;
+    }
+}
+
+// ── Экспортируем конфиг для использования во фронте ────────────────────────
+export async function getAdsConfig() {
+  'use server';
+  return ADS_CONFIG;
+}
+// ══════════════════════════════════════════════════════════════════
+// ██████╗  █████╗ ██████╗ ██████╗  ██████╗ ████████╗███╗   ███╗ █████╗ ██╗██╗
+// ██╔══██╗██╔══██╗██╔══██╗██╔══██╗██╔═══██╗╚══██╔══╝████╗ ████║██╔══██╗██║██║
+// ██████╔╝███████║██████╔╝██████╔╝██║   ██║   ██║   ██╔████╔██║███████║██║██║
+// ██╔═══╝ ██╔══██║██╔══██╗██╔══██╗██║   ██║   ██║   ██║╚██╔╝██║██╔══██║██║██║
+// ██║     ██║  ██║██║  ██║██║  ██║╚██████╔╝   ██║   ██║ ╚═╝ ██║██║  ██║██║███████╗
+// ╚═╝     ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝ ╚═════╝    ╚═╝   ╚═╝     ╚═╝╚═╝  ╚═╝╚═╝╚══════╝
+// ParrotMail — внутренняя почта ParrotSoft
+// Добавь этот блок в КОНЕЦ файла actions.js
+// ══════════════════════════════════════════════════════════════════
+
+// ── Инициализация таблиц почты ─────────────────────────────────────────────
+export async function initMailDB() {
+  'use server';
+  await client.execute(`
+    CREATE TABLE IF NOT EXISTS mail_messages (
+      id        INTEGER PRIMARY KEY AUTOINCREMENT,
+      from_user TEXT    NOT NULL,
+      to_user   TEXT    NOT NULL,
+      subject   TEXT    DEFAULT '',
+      body      TEXT    DEFAULT '',
+      is_read   INTEGER DEFAULT 0,
+      is_starred INTEGER DEFAULT 0,
+      folder    TEXT    DEFAULT 'inbox',
+      timestamp INTEGER NOT NULL
+    )
+  `);
+  // Индексы для быстрого поиска
+  try {
+    await client.execute(`CREATE INDEX IF NOT EXISTS idx_mail_to   ON mail_messages(to_user, folder)`);
+    await client.execute(`CREATE INDEX IF NOT EXISTS idx_mail_from ON mail_messages(from_user, folder)`);
+  } catch (_) {}
+}
+
+// ── Отправить письмо ───────────────────────────────────────────────────────
+export async function sendMail(fromUser, toUser, subject, body) {
+  'use server';
+  await initMailDB();
+
+  const from = String(fromUser).toLowerCase().trim();
+  const to   = String(toUser).toLowerCase().trim();
+
+  if (!from || !to || !body) return { error: 'missing_fields' };
+  if (from === to) return { error: 'self_send' };
+
+  // Проверяем что получатель существует
+  const userCheck = await client.execute({
+    sql: 'SELECT username FROM users WHERE username = ?',
+    args: [to],
+  });
+  if (userCheck.rows.length === 0) return { error: 'user_not_found' };
+
+  const now = Date.now();
+
+  // Запись во входящие получателя
+  const res = await client.execute({
+    sql: `INSERT INTO mail_messages (from_user, to_user, subject, body, folder, timestamp)
+          VALUES (?, ?, ?, ?, 'inbox', ?)`,
+    args: [from, to, subject?.trim() || '(Без темы)', body.trim(), now],
+  });
+
+  // Запись в отправленные отправителя
+  await client.execute({
+    sql: `INSERT INTO mail_messages (from_user, to_user, subject, body, folder, is_read, timestamp)
+          VALUES (?, ?, ?, ?, 'sent', 1, ?)`,
+    args: [from, to, subject?.trim() || '(Без темы)', body.trim(), now],
+  });
+
+  return { success: true, id: Number(res.lastInsertRowid) };
+}
+
+// ── Получить письма по папке ───────────────────────────────────────────────
+export async function getMails(username, folder = 'inbox') {
+  'use server';
+  await initMailDB();
+
+  const user = String(username).toLowerCase();
+  let rs;
+
+  if (folder === 'sent') {
+    rs = await client.execute({
+      sql: `SELECT * FROM mail_messages
+            WHERE from_user = ? AND folder = 'sent'
+            ORDER BY timestamp DESC`,
+      args: [user],
+    });
+  } else if (folder === 'starred') {
+    rs = await client.execute({
+      sql: `SELECT * FROM mail_messages
+            WHERE to_user = ? AND is_starred = 1 AND folder != 'trash'
+            ORDER BY timestamp DESC`,
+      args: [user],
+    });
+  } else {
+    rs = await client.execute({
+      sql: `SELECT * FROM mail_messages
+            WHERE to_user = ? AND folder = ?
+            ORDER BY timestamp DESC`,
+      args: [user, folder],
+    });
+  }
+
+  return rs.rows.map(r => ({
+    id:         Number(r.id),
+    from_user:  String(r.from_user),
+    to_user:    String(r.to_user),
+    subject:    String(r.subject || ''),
+    body:       String(r.body || ''),
+    is_read:    Number(r.is_read),
+    is_starred: Number(r.is_starred),
+    folder:     String(r.folder),
+    timestamp:  Number(r.timestamp),
+  }));
+}
+
+// ── Отметить как прочитанное ───────────────────────────────────────────────
+export async function markAsRead(mailId, username) {
+  'use server';
+  await client.execute({
+    sql: 'UPDATE mail_messages SET is_read = 1 WHERE id = ? AND to_user = ?',
+    args: [Number(mailId), String(username).toLowerCase()],
+  });
+  return { success: true };
+}
+
+// ── Переключить звёздочку ──────────────────────────────────────────────────
+export async function toggleStar(mailId, username) {
+  'use server';
+  await initMailDB();
+  const rs = await client.execute({
+    sql: 'SELECT is_starred FROM mail_messages WHERE id = ?',
+    args: [Number(mailId)],
+  });
+  if (rs.rows.length === 0) return { error: 'not_found' };
+
+  const next = Number(rs.rows[0].is_starred) === 1 ? 0 : 1;
+  await client.execute({
+    sql: 'UPDATE mail_messages SET is_starred = ? WHERE id = ? AND (to_user = ? OR from_user = ?)',
+    args: [next, Number(mailId), String(username).toLowerCase(), String(username).toLowerCase()],
+  });
+  return { success: true, is_starred: next };
+}
+
+// ── Переместить в папку ────────────────────────────────────────────────────
+export async function moveTo(mailId, username, folder) {
+  'use server';
+  const allowed = ['inbox', 'sent', 'trash', 'draft'];
+  if (!allowed.includes(folder)) return { error: 'invalid_folder' };
+
+  const user = String(username).toLowerCase();
+  await client.execute({
+    sql: 'UPDATE mail_messages SET folder = ? WHERE id = ? AND (to_user = ? OR from_user = ?)',
+    args: [folder, Number(mailId), user, user],
+  });
+  return { success: true };
+}
+
+// ── Удалить / переместить в корзину ───────────────────────────────────────
+export async function deleteMail(mailId, username) {
+  'use server';
+  await initMailDB();
+  const user = String(username).toLowerCase();
+
+  const rs = await client.execute({
+    sql: 'SELECT folder FROM mail_messages WHERE id = ? AND (to_user = ? OR from_user = ?)',
+    args: [Number(mailId), user, user],
+  });
+
+  if (rs.rows.length === 0) return { error: 'not_found' };
+
+  if (String(rs.rows[0].folder) === 'trash') {
+    // Уже в корзине — удаляем совсем
+    await client.execute({
+      sql: 'DELETE FROM mail_messages WHERE id = ?',
+      args: [Number(mailId)],
+    });
+    return { success: true, permanently_deleted: true };
+  } else {
+    // Перемещаем в корзину
+    return moveTo(mailId, username, 'trash');
+  }
+}
+
+// ── Количество непрочитанных ───────────────────────────────────────────────
+export async function getUnreadCount(username) {
+  'use server';
+  await initMailDB();
+  const rs = await client.execute({
+    sql: `SELECT COUNT(*) as cnt FROM mail_messages
+          WHERE to_user = ? AND folder = 'inbox' AND is_read = 0`,
+    args: [String(username).toLowerCase()],
+  });
+  return Number(rs.rows[0]?.cnt || 0);
+}
