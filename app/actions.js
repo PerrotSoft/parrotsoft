@@ -770,6 +770,13 @@ export async function pdb_delete(username, dbId) {
 
 
 
+
+
+
+
+
+
+
 export async function initWavyDB() {
   await client.execute(`CREATE TABLE IF NOT EXISTS wt_channels (username TEXT PRIMARY KEY, avatar TEXT, description TEXT, subscribers INTEGER DEFAULT 0, owner_account TEXT DEFAULT '', icon TEXT DEFAULT '', display_name TEXT DEFAULT '')`);
   await client.execute(`CREATE TABLE IF NOT EXISTS wt_videos (id TEXT PRIMARY KEY, channel_id TEXT, title TEXT, description TEXT, playlist TEXT DEFAULT '', likes INTEGER DEFAULT 0, dislikes INTEGER DEFAULT 0, views INTEGER DEFAULT 0, duration REAL DEFAULT 0, thumbnail TEXT, is_short INTEGER DEFAULT 0, timestamp INTEGER, video_data TEXT)`);
@@ -813,14 +820,20 @@ export async function saveVideoMetadata(videoData, analyticsData) {
 
 export async function getVideos(searchQuery = '') {
   await initWavyDB();
+  // Ensure ad columns exist on wt_channels (lazily added, may not exist on older DBs)
+  const adCols = ['ad_dev_id', 'ad_static_site_id', 'ad_video_site_id'];
+  for (const col of adCols) {
+    try { await client.execute(`ALTER TABLE wt_channels ADD COLUMN ${col} TEXT DEFAULT ''`); } catch (_) {}
+  }
   let rs;
   // КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ ДЛЯ СКОРОСТИ: НЕ ЗАГРУЖАЕМ video_data ПРИ ОТКРЫТИИ ЛЕНТЫ! (Снижает загрузку с 10+ сек до <1 сек)
-  const columns = "id, channel_id, title, description, playlist, likes, dislikes, views, duration, thumbnail, is_short, timestamp";
-  
+  const columns = "v.id, v.channel_id, v.title, v.description, v.playlist, v.likes, v.dislikes, v.views, v.duration, v.thumbnail, v.is_short, v.timestamp, c.ad_dev_id as ad_dev_id, c.ad_static_site_id as ad_static_site_id, c.ad_video_site_id as ad_video_site_id";
+  const joinSql = `FROM wt_videos v LEFT JOIN wt_channels c ON c.username = v.channel_id`;
+
   if (searchQuery) {
-    rs = await client.execute({ sql: `SELECT ${columns} FROM wt_videos WHERE title LIKE ? OR description LIKE ? ORDER BY timestamp DESC`, args: [`%${searchQuery}%`, `%${searchQuery}%`] });
+    rs = await client.execute({ sql: `SELECT ${columns} ${joinSql} WHERE v.title LIKE ? OR v.description LIKE ? ORDER BY v.timestamp DESC`, args: [`%${searchQuery}%`, `%${searchQuery}%`] });
   } else {
-    rs = await client.execute(`SELECT ${columns} FROM wt_videos ORDER BY timestamp DESC`);
+    rs = await client.execute(`SELECT ${columns} ${joinSql} ORDER BY v.timestamp DESC`);
   }
   return toPlain(rs.rows).map(v => ({...v, channel: v.channel_id}));
 }
@@ -875,8 +888,14 @@ export async function toggleLike(videoId, username, actionType) {
 export async function checkChannelState(subscriber, channel) {
   await initWavyDB();
   const subCheck = await client.execute({ sql: "SELECT 1 FROM wt_subs WHERE subscriber = ? AND channel = ?", args: [subscriber, channel] });
-  const countCheck = await client.execute({ sql: "SELECT subscribers FROM wt_channels WHERE username = ?", args: [channel] });
-  return { isSubscribed: subCheck.rows.length > 0, subscribers: countCheck.rows[0]?.subscribers || 0 };
+  const countCheck = await client.execute({ sql: "SELECT subscribers, icon, display_name FROM wt_channels WHERE username = ?", args: [channel] });
+  const row = countCheck.rows[0] || {};
+  return {
+    isSubscribed: subCheck.rows.length > 0,
+    subscribers: row.subscribers || 0,
+    icon: row.icon || '',
+    display_name: row.display_name || '',
+  };
 }
 
 export async function toggleSubscription(subscriber, channel) {
@@ -900,6 +919,38 @@ export async function getChannelProfile(username) {
   const rs = await client.execute({ sql: "SELECT * FROM wt_channels WHERE username = ?", args: [username] });
   if (rs.rows.length === 0) return { username, avatar: `https://api.dicebear.com/7.x/bottts/svg?seed=${username}`, subscribers: 0, description: '' };
   return toPlain(rs.rows)[0];
+}
+
+export async function updateChannelProfile(username, settings) {
+  'use server';
+  await initWavyDB();
+  // Ensure columns exist (added lazily so existing DBs are not broken)
+  const extraCols = ['ad_dev_id', 'ad_static_site_id', 'ad_video_site_id', 'icon', 'display_name', 'link'];
+  for (const col of extraCols) {
+    try { await client.execute(`ALTER TABLE wt_channels ADD COLUMN ${col} TEXT DEFAULT ''`); } catch (_) {}
+  }
+  await client.execute({
+    sql: `UPDATE wt_channels
+          SET description = ?,
+              ad_dev_id = ?,
+              ad_static_site_id = ?,
+              ad_video_site_id = ?,
+              icon = ?,
+              display_name = ?,
+              link = ?
+          WHERE username = ?`,
+    args: [
+      String(settings.description || ''),
+      String(settings.ad_dev_id || ''),
+      String(settings.ad_static_site_id || ''),
+      String(settings.ad_video_site_id || ''),
+      String(settings.icon || ''),
+      String(settings.display_name || ''),
+      String(settings.link || ''),
+      String(username),
+    ],
+  });
+  return { success: true };
 }
 
 export async function getUserPlaylists(username) {

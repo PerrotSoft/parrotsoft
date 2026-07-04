@@ -1,18 +1,40 @@
-// components/FireSoftAd.jsx
 'use client';
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 
-export default function FireSoftAd({ type = 'banner', devId = 'Icfg', siteId = 'test_site', style }) {
+export default function FireSoftAd({ devId, staticSiteId, videoSiteId, isMidroll, style }) {
   const [loading, setLoading] = useState(true);
-  
-  const adUrl = `/api/ads?action=renderAd&type=${type}&devId=${devId}&siteId=${siteId}&t=${Date.now()}`;
+  const [adConfig, setAdConfig] = useState({ type: 'banner', devId: 'Icfg', siteId: 'adsterra_default' });
+
+  useEffect(() => {
+    // Проверяем, настроил ли автор монетизацию
+    const hasCustomAdSystem = devId && devId !== 'Icfg' && devId.trim() !== '';
+
+    if (!hasCustomAdSystem) {
+      // 100% трафика на платформу, если у автора нет аккаунта разработчика
+      setAdConfig({ type: 'banner', devId: 'Icfg', siteId: 'adsterra_default' });
+    } else {
+      // Распределение трафика: 60% видео, 35% платформа (Adsterra), 5% статика
+      const rand = Math.random() * 100;
+      if (rand < 60) {
+        setAdConfig({ type: 'video', devId: devId, siteId: videoSiteId || 'default_video' });
+      } else if (rand < 95) {
+        setAdConfig({ type: 'banner', devId: 'Icfg', siteId: 'adsterra_default' });
+      } else {
+        setAdConfig({ type: 'banner', devId: devId, siteId: staticSiteId || 'default_static' });
+      }
+    }
+  }, [devId, staticSiteId, videoSiteId]);
+
+  // Если это мидролл внутри видео, принудительно запрашиваем видео-рекламу или баннер нужного формата
+  const targetType = isMidroll ? 'video' : adConfig.type;
+  const adUrl = `/api/ads?action=renderAd&type=${targetType}&devId=${adConfig.devId}&siteId=${adConfig.siteId}&t=${Date.now()}`;
 
   return (
     <div style={{ 
       position: 'relative', 
       width: '100%', 
       height: '100%', 
-      minHeight: type === 'video' ? '250px' : '90px', 
+      minHeight: targetType === 'video' || isMidroll ? '250px' : '90px', 
       overflow: 'hidden', 
       backgroundColor: '#0f172a', 
       borderRadius: 'inherit',

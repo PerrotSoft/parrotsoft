@@ -1,11 +1,11 @@
-// page.js
 'use client';
 
 import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 import * as actions from '../actions';
 import WavyPlayer from './components/WavyPlayer';
-import { RecommendationSystem } from './components/recommendations';
+import { RecommendationSystem, getGlobalRecommendations } from './components/recommendations';
+import FireSoftAd from './components/FireSoftAd';
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile } from '@ffmpeg/util';
 
@@ -169,6 +169,151 @@ function CreateChannelPopup({ accountId, accountKey, currentCount, onCreated, on
   );
 }
 
+// Модальное окно настроек канала для Студии
+function ChannelSettingsModal({ channel, onClose, onSave }) {
+  const [displayName, setDisplayName] = useState(channel?.display_name || channel?.username || '');
+  const [description, setDescription] = useState(channel?.description || '');
+  const [iconLink, setIconLink] = useState(channel?.icon || '');
+  const [iconFileName, setIconFileName] = useState('');
+  const [channelLink, setChannelLink] = useState(channel?.link || '');
+  const [devId, setDevId] = useState(channel?.ad_dev_id || '');
+
+  const handleIconFileChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setIconFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = ev => setIconLink(ev.target.result);
+    reader.readAsDataURL(file);
+  };
+
+  const handleFormSubmit = (e) => {
+    e.preventDefault();
+    onSave({
+      display_name: displayName,
+      description,
+      icon: iconLink,
+      link: channelLink,
+      ad_dev_id: devId
+    });
+    onClose();
+  };
+
+  return (
+    <div className="comments-popup-backdrop" onClick={onClose}>
+      <div className="create-ch-popup" style={{ maxWidth: '480px' }} onClick={e => e.stopPropagation()}>
+        <div className="comments-popup-header">
+          <h3>⚙️ Настройки канала</h3>
+          <button className="popup-close-btn" onClick={onClose}>✕</button>
+        </div>
+        <form onSubmit={handleFormSubmit} className="create-ch-form">
+          <div className="field-group">
+            <label>Имя канала</label>
+            <input type="text" className="upload-input" value={displayName} onChange={e => setDisplayName(e.target.value)} required />
+          </div>
+          <div className="field-group">
+            <label>Описание канала</label>
+            <textarea className="upload-input upload-textarea" value={description} onChange={e => setDescription(e.target.value)} rows={3} />
+          </div>
+          <div className="field-group">
+            <label>Иконка канала</label>
+            <div className="ch-icon-edit-row">
+              <div className="ch-icon-preview ch-icon-preview-sm">
+                {iconLink && iconLink.startsWith('data:')
+                  ? <img src={iconLink} alt="icon" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: '50%' }} />
+                  : <span style={{ fontSize: 24 }}>{iconLink || '👤'}</span>
+                }
+              </div>
+              <label className="upload-img-label ch-icon-choose-btn">
+                <input type="file" accept="image/*" onChange={handleIconFileChange} style={{ display: 'none' }} />
+                📁 Выбрать файл
+              </label>
+              <span className="ch-icon-filename">{iconFileName || 'Файл не выбран'}</span>
+            </div>
+            <input
+              type="text"
+              className="upload-input"
+              style={{ marginTop: 8 }}
+              value={iconLink.startsWith('data:') ? '' : iconLink}
+              onChange={e => { setIconLink(e.target.value); setIconFileName(''); }}
+              placeholder="или вставьте эмодзи/ссылку на изображение"
+            />
+          </div>
+          <div className="field-group">
+            <label>Ссылка канала (пользовательский URL)</label>
+            <input type="text" className="upload-input" value={channelLink} onChange={e => setChannelLink(e.target.value)} placeholder="https://..." />
+          </div>
+          <div className="field-group" style={{ marginTop: '8px', padding: '12px', background: 'rgba(99,102,241,0.08)', borderRadius: '10px', border: '1px solid rgba(99,102,241,0.2)' }}>
+            <label style={{ color: '#a5b4fc', fontWeight: 'bold' }}>Прямая привязка аккаунта разработчика</label>
+            <p style={{ margin: '4px 0 8px', fontSize: '12px', color: '#ccc' }}>Проверка монетизации идёт напрямую в студии.</p>
+            <input type="text" className="upload-input" value={devId} onChange={e => setDevId(e.target.value)} placeholder="ID разработчика FireSoft" />
+          </div>
+          <button type="submit" className="btn-publish" style={{ marginTop: '12px' }}>💾 Сохранить изменения</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// SVG график удержания с линией и точными процентами
+function VisualRetentionLineChart({ data }) {
+  if (!data || data.length === 0) return null;
+
+  const maxSegment = Math.max(...data.map(d => d.segment), 1);
+  const maxViews = Math.max(...data.map(d => d.views), 1);
+
+  // Генерируем точки для SVG пути полилинии
+  const points = data.map((d, index) => {
+    const x = (index / Math.max(data.length - 1, 1)) * 500 + 20;
+    const y = 180 - ((d.views / maxViews) * 150) + 10;
+    const percentage = Math.round((d.views / maxViews) * 100);
+    return { x, y, segment: d.segment, views: d.views, percentage };
+  });
+
+  const svgPath = points.map((pt, idx) => `${idx === 0 ? 'M' : 'L'} ${pt.x} ${pt.y}`).join(' ');
+
+  return (
+    <div style={{ background: 'rgba(0,0,0,0.4)', padding: '20px', borderRadius: '12px', border: '1px inset rgba(255,255,255,0.05)' }}>
+      <svg viewBox="0 0 540 220" style={{ width: '100%', height: '220px', overflow: 'visible' }}>
+        {/* Горизонтальные линии сетки */}
+        <line x1="20" y1="20" x2="520" y2="20" stroke="rgba(255,255,255,0.08)" strokeDasharray="4 4" />
+        <line x1="20" y1="95" x2="520" y2="95" stroke="rgba(255,255,255,0.08)" strokeDasharray="4 4" />
+        <line x1="20" y1="170" x2="520" y2="170" stroke="rgba(255,255,255,0.08)" />
+
+        <text x="0" y="24" fill="#888" fontSize="10">100%</text>
+        <text x="0" y="99" fill="#888" fontSize="10">50%</text>
+        <text x="0" y="174" fill="#888" fontSize="10">0%</text>
+
+        {/* Заливка под линией */}
+        <path d={`${svgPath} L 520 170 L 20 170 Z`} fill="url(#retentionGradient)" opacity="0.25" />
+        
+        <defs>
+          <linearGradient id="retentionGradient" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#6366f1" stopOpacity="0.8" />
+            <stop offset="100%" stopColor="#6366f1" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+
+        {/* Основная линия */}
+        <path d={svgPath} fill="none" stroke="#6366f1" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />
+
+        {/* Точки на графике и подписи процентов */}
+        {points.map((pt, idx) => (
+          <g key={idx}>
+            <circle cx={pt.x} cy={pt.y} r="5" fill="#fff" stroke="#6366f1" strokeWidth="3" />
+            <text x={pt.x} y={pt.y - 12} fill="#a5b4fc" fontSize="11" textAnchor="middle" fontWeight="bold">
+              {pt.percentage}%
+            </text>
+            <text x={pt.x} y="195" fill="#888" fontSize="11" textAnchor="middle">
+              #{pt.segment}
+            </text>
+          </g>
+        ))}
+      </svg>
+    </div>
+  );
+}
+
 function WavyTubeContent() {
   const searchParams = useSearchParams();
 
@@ -184,15 +329,17 @@ function WavyTubeContent() {
   const [myChannels, setMyChannels]       = useState([]); 
   const [currentChannel, setCurrentChannel] = useState(null); 
   const [showCreateChannel, setShowCreateChannel] = useState(false);
+  const [showChannelSettingsModal, setShowChannelSettingsModal] = useState(false);
   const [channelsLoading, setChannelsLoading] = useState(true);
 
   const [videos, setVideos]       = useState([]);
+  const [globalRecs, setGlobalRecs] = useState([]);
   const [comments, setComments]   = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [isShort, setIsShort]     = useState(false);
   const [analyticsVideo, setAnalyticsVideo] = useState(null);
   const [mockSegmentData, setMockSegmentData] = useState([]);
-  const [channelStats, setChannelStats] = useState({ isSubscribed: false, subscribers: 0 });
+  const [channelStats, setChannelStats] = useState({ isSubscribed: false, subscribers: 0, icon: '', display_name: '' });
   const [commentsPopupVideo, setCommentsPopupVideo] = useState(null);
 
   const [uploadTitle, setUploadTitle]   = useState('');
@@ -284,6 +431,7 @@ function WavyTubeContent() {
       const res = await actions.getVideos();
       if (res) {
         setVideos(res);
+        setGlobalRecs(getGlobalRecommendations(res.filter(v => !v.is_short)));
         lastFetchRef.current = Date.now();
       }
     } catch(e) { console.error(e); }
@@ -315,6 +463,21 @@ function WavyTubeContent() {
     }
   };
 
+  const handleSaveChannelModalSettings = async (updatedSettings) => {
+    if (!currentChannel) return;
+    try {
+      if (actions.updateChannelProfile) {
+         await actions.updateChannelProfile(currentChannel.username, updatedSettings);
+      }
+      const updatedChannel = { ...currentChannel, ...updatedSettings };
+      setCurrentChannel(updatedChannel);
+      setMyChannels(myChannels.map(c => c.username === updatedChannel.username ? updatedChannel : c));
+      alert('✅ Настройки канала успешно сохранены!');
+    } catch(err) {
+      alert('Ошибка при сохранении: ' + err.message);
+    }
+  };
+
   const playVideo = async (video) => {
     setActiveVideo(video); setActiveTab('watch');
     if (video.id) {
@@ -335,7 +498,7 @@ function WavyTubeContent() {
   const toggleSubscription = async () => {
     if (!activeVideo || !currentChannel) return;
     const res = await actions.toggleSubscription(currentChannel.username, activeVideo.channel);
-    if (res.success) setChannelStats({ isSubscribed: res.isSubbed, subscribers: res.count });
+    if (res.success) setChannelStats(prev => ({ ...prev, isSubscribed: res.isSubbed, subscribers: res.count }));
   };
 
   const handleVideoSelect = (e) => {
@@ -462,6 +625,7 @@ function WavyTubeContent() {
             title: uploadTitle, description: uploadDesc,
             playlist: selectedPlaylist, thumbnail: thumbDataUrl,
             is_short: isShort, duration: videoDuration,
+            ad_dev_id: currentChannel.ad_dev_id
           }, { tags: '', audience_type: 'general' });
 
           setUploadStatus('Начало загрузки сегментов...');
@@ -522,14 +686,18 @@ function WavyTubeContent() {
     if (dbStats?.length > 0) {
       setMockSegmentData(dbStats.map(s => ({ segment: parseInt(s.segment_index), views: s.watch_count })));
     } else {
-      setMockSegmentData(Array.from({ length: 20 }, (_, i) => ({ segment: i+1, views: Math.floor(Math.random() * (video.views || 100)) })));
+      const baseViews = video.views || 100;
+      setMockSegmentData(Array.from({ length: 8 }, (_, i) => ({ 
+        segment: i + 1, 
+        views: Math.max(Math.round(baseViews * Math.pow(0.85, i)), 5)
+      })));
     }
   };
 
-  const filteredVideos = videos.filter(v =>
+  const filteredVideos = globalRecs.filter(v =>
     v.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     v.playlist?.toLowerCase().includes(searchQuery.toLowerCase())
-  ).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  );
 
   const shortsList = videos.filter(v => v.is_short || v.playlist === 'Shorts').sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
@@ -550,6 +718,10 @@ function WavyTubeContent() {
 
       {showCreateChannel && (
         <CreateChannelPopup accountId={accountId} accountKey={accountKey} currentCount={myChannels.length} onCreated={handleChannelCreated} onClose={() => setShowCreateChannel(false)} />
+      )}
+
+      {showChannelSettingsModal && currentChannel && (
+        <ChannelSettingsModal channel={currentChannel} onClose={() => setShowChannelSettingsModal(false)} onSave={handleSaveChannelModalSettings} />
       )}
 
       {mobileMenuOpen && <div className="mobile-backdrop" onClick={() => setMobileMenuOpen(false)}></div>}
@@ -647,7 +819,13 @@ function WavyTubeContent() {
             <div className="watch-layout">
               <div className="watch-main-column">
                 <div className="video-player-frame">
-                  <WavyPlayer videoId={activeVideo.id} duration={activeVideo.duration} />
+                  <WavyPlayer 
+                    videoId={activeVideo.id} 
+                    duration={activeVideo.duration} 
+                    authorAdDevId={activeVideo.ad_dev_id}
+                    authorAdStaticId={activeVideo.ad_static_site_id}
+                    authorAdVideoId={activeVideo.ad_video_site_id}
+                  />
                 </div>
                 <div className="video-details-card">
                   <div className="details-header">
@@ -659,10 +837,10 @@ function WavyTubeContent() {
                     </div>
                   </div>
                   <div className="channel-author-row" onClick={() => { setSelectedChannelName(activeVideo.channel); setActiveTab('channel-view'); }}>
-                    <div className="author-avatar">{activeVideo.channel?.[0]}</div>
+                    <div className="author-avatar">{chIcon({ icon: channelStats.icon, display_name: channelStats.display_name, username: activeVideo.channel })}</div>
                     <div style={{ flex: 1 }}>
-                      <h3>{activeVideo.channel}</h3>
-                      <p>{channelStats.subscribers} подписчиков</p>
+                      <h3>{channelStats.display_name || activeVideo.channel}</h3>
+                      <p>@{activeVideo.channel} • {channelStats.subscribers} подписчиков</p>
                     </div>
                     {currentChannel?.username !== activeVideo.channel && (
                       <button className="subscribe-action-btn" onClick={e => { e.stopPropagation(); toggleSubscription(); }}>
@@ -702,18 +880,26 @@ function WavyTubeContent() {
                 </div>
               ) : (
                 <div className="videos-compact-grid">
-                  {filteredVideos.map(video => (
-                    <div key={video.id} className="wavy-video-card" onClick={() => playVideo(video)}>
-                      <div className="thumbnail-wrapper">
-                        {video.thumbnail ? <img src={video.thumbnail} alt={video.title} /> : <video src={`/api/video?id=${video.id}`} preload="metadata" muted playsInline style={{width:'100%', height:'100%', objectFit:'cover', position:'absolute'}} />}
-                        <span className="duration-tag">{video.is_short ? '⚡ Short' : 'HD'}</span>
+                  {filteredVideos.map((video, index) => (
+                    <React.Fragment key={video.id}>
+                      <div className="wavy-video-card" onClick={() => playVideo(video)}>
+                        <div className="thumbnail-wrapper">
+                          {video.thumbnail ? <img src={video.thumbnail} alt={video.title} /> : <video src={`/api/video?id=${video.id}`} preload="metadata" muted playsInline style={{width:'100%', height:'100%', objectFit:'cover', position:'absolute'}} />}
+                          <span className="duration-tag">{video.is_short ? '⚡ Short' : 'HD'}</span>
+                        </div>
+                        <div className="card-info">
+                          <h3>{video.title}</h3>
+                          <p className="card-channel">@{video.channel}</p>
+                          <div className="card-stats"><span>👁 {video.views||0}</span><span>•</span><span>👍 {video.likes||0}</span></div>
+                        </div>
                       </div>
-                      <div className="card-info">
-                        <h3>{video.title}</h3>
-                        <p className="card-channel">@{video.channel}</p>
-                        <div className="card-stats"><span>👁 {video.views||0}</span><span>•</span><span>👍 {video.likes||0}</span></div>
-                      </div>
-                    </div>
+
+                      {(index + 1) % 10 === 0 && video.ad_dev_id && (
+                        <div style={{ gridColumn: '1 / -1', height: '140px', borderRadius: '12px', overflow: 'hidden', margin: '10px 0', border: '1px solid var(--win25-border)' }}>
+                           <FireSoftAd devId={video.ad_dev_id} staticSiteId={video.ad_static_site_id} videoSiteId={video.ad_video_site_id} />
+                        </div>
+                      )}
+                    </React.Fragment>
                   ))}
                 </div>
               )}
@@ -728,26 +914,36 @@ function WavyTubeContent() {
                     const isActive = idx === activeShortsIndex;
                     const isNear   = Math.abs(idx - activeShortsIndex) === 1;
                     return (
-                      <div key={short.id} className="short-vertical-slide" data-idx={idx} ref={el => (shortsRefs.current[idx] = el)}>
-                        <div className="short-player-wrapper">
-                          <ShortsPlayer short={short} isActive={isActive} isNear={isNear} />
-                          <div className="short-overlay-details">
-                            <div className="short-channel-row">
-                              <div className="short-avatar">{short.channel?.[0]?.toUpperCase()}</div>
-                              <div>
-                                <div className="short-channel-name">@{short.channel}</div>
-                                <div className="short-title">{short.title}</div>
+                      <React.Fragment key={short.id}>
+                        <div className="short-vertical-slide" data-idx={idx} ref={el => (shortsRefs.current[idx] = el)}>
+                          <div className="short-player-wrapper">
+                            <ShortsPlayer short={short} isActive={isActive} isNear={isNear} />
+                            <div className="short-overlay-details">
+                              <div className="short-channel-row">
+                                <div className="short-avatar">{short.channel?.[0]?.toUpperCase()}</div>
+                                <div>
+                                  <div className="short-channel-name">@{short.channel}</div>
+                                  <div className="short-title">{short.title}</div>
+                                </div>
                               </div>
                             </div>
-                          </div>
-                          <div className="short-side-actions">
-                            <button className="short-action-btn"><span>❤️</span><span>{short.likes||0}</span></button>
-                            <button className="short-action-btn"><span>👁️</span><span>{short.views||0}</span></button>
-                            <button className="short-action-btn" onClick={() => setCommentsPopupVideo(short)}><span>💬</span><span>Чат</span></button>
-                            <button className="short-action-btn" onClick={() => { setActiveVideo(short); setActiveTab('watch'); }}><span>▶️</span><span>Full</span></button>
+                            <div className="short-side-actions">
+                              <button className="short-action-btn"><span>❤️</span><span>{short.likes||0}</span></button>
+                              <button className="short-action-btn"><span>👁️</span><span>{short.views||0}</span></button>
+                              <button className="short-action-btn" onClick={() => setCommentsPopupVideo(short)}><span>💬</span><span>Чат</span></button>
+                              <button className="short-action-btn" onClick={() => { setActiveVideo(short); setActiveTab('watch'); }}><span>▶️</span><span>Full</span></button>
+                            </div>
                           </div>
                         </div>
-                      </div>
+
+                        {(idx + 1) % 10 === 0 && short.ad_dev_id && (
+                          <div className="short-vertical-slide" style={{ padding: '20px 0' }}>
+                            <div className="short-player-wrapper" style={{ border: '2px solid var(--win25-accent)', background: '#000', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                               <FireSoftAd devId={short.ad_dev_id} staticSiteId={short.ad_static_site_id} videoSiteId={short.ad_video_site_id} isMidroll={true} />
+                            </div>
+                          </div>
+                        )}
+                      </React.Fragment>
                     );
                   })
               }
@@ -756,7 +952,7 @@ function WavyTubeContent() {
 
           {activeTab === 'studio' && (
             <div className="studio-layout">
-              <div className="studio-top-bar">
+              <div className="studio-top-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <div>
                   <h2>Творческая Студия</h2>
                   {currentChannel
@@ -764,6 +960,11 @@ function WavyTubeContent() {
                     : <p className="studio-subtitle" style={{color:'#e84545'}}>Выберите канал в боковом меню</p>
                   }
                 </div>
+                {currentChannel && (
+                  <button className="upload-shortcut-btn" onClick={() => setShowChannelSettingsModal(true)}>
+                    ⚙️ Настройки канала
+                  </button>
+                )}
               </div>
 
               {myChannels.length > 1 && (
@@ -813,22 +1014,16 @@ function WavyTubeContent() {
 
               {analyticsVideo && (
                 <div className="analytics-modal-box-acrylic">
-                  <div className="modal-header">
+                  <div className="modal-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                     <div>
-                      <h3>Аналитика: {analyticsVideo.title}</h3>
-                      <p style={{fontSize:13, color:'#888', margin:'6px 0 0'}}>График показывает, сколько раз зрители посмотрели каждый отрезок видео. Если столбик высокий — этот момент пересматривали часто. Если низкий — его пропускали.</p>
+                      <h3>📈 График удержания аудитории: {analyticsVideo.title}</h3>
+                      <p style={{fontSize:13, color:'#888', margin:'6px 0 0'}}>Линия показывает процент зрителей, досмотревших до каждого конкретного отрезка видео.</p>
                     </div>
-                    <button onClick={() => setAnalyticsVideo(null)} className="close-modal">✕</button>
+                    <button onClick={() => setAnalyticsVideo(null)} className="close-modal" style={{ background: 'transparent', border: 'none', color: '#fff', fontSize: '18px', cursor: 'pointer' }}>✕</button>
                   </div>
-                  <h4 style={{margin:'20px 0 10px',fontSize:14,color:'#aaa'}}>Удержание по сегментам (по умолчанию каждые 10 сек)</h4>
-                  <div className="chart-timeline-container">
-                    {mockSegmentData.map((pt, idx) => (
-                      <div key={idx} className="chart-bar-node" title={`Сегмент ${pt.segment} - Просмотры: ${pt.views}`}>
-                        <div className="bar-label-tag">{pt.views} 👁</div>
-                        <div className="bar-fill-indicator" style={{height:`${Math.max(5,(pt.views/200)*100)}%`}} />
-                        <div className="bar-label-tag">#{pt.segment}</div>
-                      </div>
-                    ))}
+                  
+                  <div style={{ marginTop: '20px' }}>
+                    <VisualRetentionLineChart data={mockSegmentData} />
                   </div>
                 </div>
               )}
@@ -950,7 +1145,7 @@ function WavyTubeContent() {
                         <input type="file" accept="image/*" onChange={handleCustomImageUpload} className="upload-image-input" />
                         {thumbDataUrl && (
                           <div style={{marginTop:12}}>
-                            <img src={thumbDataUrl} alt="Preview" style={{width:'100%',aspectRatio:'16/9',objectFit:'cover',borderRadius:8,border:'2px solid #0078d4'}} />
+                            <img src={thumbDataUrl} alt="Preview" style={{width:'100%',aspectRatio:'16/9',objectFit:'cover',borderRadius:8,border:'2px solid var(--win25-accent)'}} />
                           </div>
                         )}
                       </div>
@@ -995,8 +1190,8 @@ function WavyTubeContent() {
           --win25-panel: rgba(22, 23, 26, 0.75);
           --win25-panel-solid: #16171a;
           --win25-border: rgba(255, 255, 255, 0.08);
-          --win25-accent: #0078d4;
-          --win25-accent-gradient: linear-gradient(135deg, #0078d4, #8660a9);
+          --win25-accent: #6366f1;
+          --win25-accent-gradient: linear-gradient(135deg, #6366f1, #8b5cf6);
           --win25-text: #f3f3f3;
           --win25-text-dim: #adadad;
         }
@@ -1029,7 +1224,7 @@ function WavyTubeContent() {
         .channel-pill { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; cursor: pointer; transition: background 0.2s, border 0.2s; border: 1px solid transparent; position: relative; }
         .channel-pill:hover { background: rgba(255, 255, 255, 0.05); }
         .channel-pill:hover .ch-delete-btn { opacity: 1; }
-        .channel-pill.current { background: rgba(0, 120, 212, 0.15); border-color: rgba(0, 120, 212, 0.3); }
+        .channel-pill.current { background: rgba(99, 102, 241, 0.15); border-color: rgba(99, 102, 241, 0.3); }
         .avatar-mini { width: 28px; height: 28px; background: var(--win25-accent-gradient); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: bold; flex-shrink: 0; }
         .ch-text { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
         .ch-name { font-size: 14px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1037,8 +1232,8 @@ function WavyTubeContent() {
         .active-dot { position: absolute; right: 12px; width: 6px; height: 6px; background: var(--win25-accent); border-radius: 50%; }
         .ch-delete-btn { background: transparent; border: none; color: #888; cursor: pointer; font-size: 12px; padding: 4px; border-radius: 4px; opacity: 0; transition: 0.2s; position: absolute; right: 6px; }
         .ch-delete-btn:hover { color: #e84545; background: rgba(232,17,35,0.15); }
-        .add-channel-btn { width: 100%; margin-top: 12px; background: rgba(0,120,212,0.1); border: 1px dashed rgba(0,120,212,0.4); color: #6ab4f5; padding: 10px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; transition: 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px; }
-        .add-channel-btn:hover { background: rgba(0,120,212,0.2); border-color: rgba(0,120,212,0.6); }
+        .add-channel-btn { width: 100%; margin-top: 12px; background: rgba(99,102,241,0.1); border: 1px dashed rgba(99,102,241,0.4); color: #a5b4fc; padding: 10px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; transition: 0.2s; display: flex; align-items: center; justify-content: center; gap: 8px; }
+        .add-channel-btn:hover { background: rgba(99,102,241,0.2); border-color: rgba(99,102,241,0.6); }
         .account-badge { display: flex; align-items: center; gap: 8px; padding: 12px 6px 0; }
         .account-id-label { font-size: 12px; color: #888; }
         .status-indicator { width: 8px; height: 8px; border-radius: 50%; }
@@ -1052,7 +1247,7 @@ function WavyTubeContent() {
         .mobile-menu-btn, .mobile-brand { display: none; }
         .search-box { position: relative; width: 450px; }
         .search-box input { width: 100%; background: rgba(255,255,255,0.05); border: 1px solid var(--win25-border); padding: 12px 40px 12px 20px; border-radius: 24px; color: white; outline: none; font-size: 14px; transition: 0.2s; }
-        .search-box input:focus { border-color: rgba(0,120,212,0.5); background: rgba(255,255,255,0.08); }
+        .search-box input:focus { border-color: rgba(99,102,241,0.5); background: rgba(255,255,255,0.08); }
         .clear-search { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); background: transparent; border: none; color: #888; font-size: 18px; cursor: pointer; }
         .user-profile-badge { display: flex; align-items: center; gap: 12px; font-size: 14px; font-weight: 500; color: #ccc; }
         
@@ -1072,15 +1267,15 @@ function WavyTubeContent() {
         .rec-info p { margin: 0; font-size: 12px; color: #aaa; }
         .rec-info p.ch-link { cursor: pointer; color: #ccc; transition: 0.2s; }
         .rec-info p.ch-link:hover { color: #fff; text-decoration: underline; }
-        .btn-view-playlist { background: rgba(0,120,212,0.15); color: #6ab4f5; border: 1px solid rgba(0,120,212,0.3); padding: 10px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; transition: 0.2s; }
-        .btn-view-playlist:hover { background: rgba(0,120,212,0.25); }
+        .btn-view-playlist { background: rgba(99,102,241,0.15); color: #a5b4fc; border: 1px solid rgba(99,102,241,0.3); padding: 10px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; transition: 0.2s; }
+        .btn-view-playlist:hover { background: rgba(99,102,241,0.25); }
         .playlist-view-header { display: flex; flex-direction: column; gap: 12px; border-bottom: 1px solid var(--win25-border); padding-bottom: 12px; }
         .btn-back-recs { align-self: flex-start; background: transparent; border: none; color: #aaa; cursor: pointer; font-size: 13px; transition: 0.2s; }
         .btn-back-recs:hover { color: #fff; }
         .playlist-view-header h3 { margin: 0; font-size: 16px; }
         .sort-toggles { display: flex; gap: 8px; }
         .sort-toggles button { flex: 1; padding: 6px; background: rgba(255,255,255,0.05); border: 1px solid var(--win25-border); color: #ccc; border-radius: 6px; cursor: pointer; font-size: 12px; transition: 0.2s; }
-        .sort-toggles button.active { background: rgba(0,120,212,0.2); border-color: rgba(0,120,212,0.4); color: #fff; }
+        .sort-toggles button.active { background: rgba(99,102,241,0.2); border-color: rgba(99,102,241,0.4); color: #fff; }
 
         .trim-controls { display: flex; gap: 12px; margin-top: 12px; }
         .trim-controls label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #aaa; flex: 1; }
@@ -1103,7 +1298,7 @@ function WavyTubeContent() {
         .card-stats { display: flex; gap: 10px; font-size: 12px; color: #888; }
         .empty-state { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; height: 400px; color: #777; text-align: center; }
         .cta-upload-btn { background: var(--win25-accent); color: #fff; border: none; padding: 12px 28px; border-radius: 8px; cursor: pointer; font-size: 15px; font-weight: 600; transition: 0.2s; }
-        .cta-upload-btn:hover { background: #0086f0; }
+        .cta-upload-btn:hover { background: #4f46e5; }
         .video-player-frame { width: 100%; }
         .video-details-card { background: var(--win25-panel-solid); padding: 24px; border-radius: 16px; border: 1px solid var(--win25-border); display: flex; flex-direction: column; gap: 16px; }
         .details-header h1 { margin: 0 0 12px 0; font-size: 22px; line-height: 1.4; }
@@ -1133,7 +1328,7 @@ function WavyTubeContent() {
         .popup-comment-form input { flex: 1; background: rgba(255,255,255,0.05); border: 1px solid var(--win25-border); border-radius: 24px; padding: 12px 20px; color: #fff; font-size: 15px; outline: none; transition: 0.2s; }
         .popup-comment-form input:focus { border-color: var(--win25-accent); background: rgba(255,255,255,0.08); }
         .popup-submit-btn { width: 44px; height: 44px; background: var(--win25-accent); border: none; border-radius: 50%; color: white; cursor: pointer; font-size: 20px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: 0.2s; }
-        .popup-submit-btn:hover { background: #0086f0; }
+        .popup-submit-btn:hover { background: #4f46e5; }
         .popup-comments-list { overflow-y: auto; padding: 20px 28px; display: flex; flex-direction: column; gap: 20px; flex: 1; }
         .popup-comment-item { display: flex; gap: 14px; }
         .popup-c-avatar { width: 40px; height: 40px; background: #444; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 14px; font-weight: 700; flex-shrink: 0; }
@@ -1148,9 +1343,13 @@ function WavyTubeContent() {
         .emoji-grid { display: grid; grid-template-columns: repeat(10, 1fr); gap: 6px; margin-bottom: 12px; }
         .emoji-option { font-size: 20px; text-align: center; padding: 6px; border-radius: 8px; cursor: pointer; border: 1px solid transparent; transition: 0.2s; }
         .emoji-option:hover { background: rgba(255,255,255,0.08); }
-        .emoji-option.selected { background: rgba(0,120,212,0.15); border-color: rgba(0,120,212,0.4); }
+        .emoji-option.selected { background: rgba(99,102,241,0.15); border-color: rgba(99,102,241,0.4); }
         .upload-img-label { display: inline-block; background: rgba(255,255,255,0.08); border: 1px solid var(--win25-border); color: #ccc; padding: 8px 16px; border-radius: 8px; cursor: pointer; font-size: 13px; transition: 0.2s; }
         .upload-img-label:hover { background: rgba(255,255,255,0.12); }
+        .ch-icon-edit-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+        .ch-icon-preview-sm { width: 48px; height: 48px; }
+        .ch-icon-choose-btn { padding: 8px 14px; margin: 0; white-space: nowrap; }
+        .ch-icon-filename { font-size: 12px; color: var(--win25-text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 160px; }
         .create-ch-fields { display: flex; flex-direction: column; gap: 16px; }
         .field-group { display: flex; flex-direction: column; gap: 8px; }
         .field-group label { font-size: 14px; color: #ccc; font-weight: 500; }
@@ -1174,12 +1373,12 @@ function WavyTubeContent() {
         .studio-subtitle { margin: 6px 0 0; font-size: 15px; color: #888; }
         .btn-create-ch-top { background: rgba(255,255,255,0.08); border: 1px solid var(--win25-border); color: #fff; padding: 12px 20px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; transition: 0.2s; }
         .btn-create-ch-top:hover { background: rgba(255,255,255,0.15); }
-        .upload-shortcut-btn { background: var(--win25-accent-gradient); color: #fff; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; white-space: nowrap; transition: 0.2s; box-shadow: 0 4px 12px rgba(0,120,212,0.3); }
+        .upload-shortcut-btn { background: var(--win25-accent-gradient); color: #fff; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; white-space: nowrap; transition: 0.2s; box-shadow: 0 4px 12px rgba(99,102,241,0.3); }
         .upload-shortcut-btn:hover { opacity: 0.9; transform: translateY(-2px); }
         .studio-ch-tabs { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
         .studio-ch-tab { display: flex; align-items: center; gap: 10px; background: rgba(255,255,255,0.05); border: 1px solid var(--win25-border); color: var(--win25-text-dim); padding: 10px 18px; border-radius: 24px; cursor: pointer; font-size: 14px; font-weight: 500; transition: 0.2s; }
         .studio-ch-tab:hover { background: rgba(255,255,255,0.1); }
-        .studio-ch-tab.active { background: rgba(0,120,212,0.15); border-color: rgba(0,120,212,0.4); color: #fff; }
+        .studio-ch-tab.active { background: rgba(99,102,241,0.15); border-color: rgba(99,102,241,0.4); color: #fff; }
         .studio-table-wrapper { background: var(--win25-panel-solid); border: 1px solid var(--win25-border); border-radius: 16px; overflow-x: auto; box-shadow: 0 8px 24px rgba(0,0,0,0.2); }
         .studio-table { width: 100%; border-collapse: collapse; text-align: left; font-size: 15px; min-width: 600px; }
         .studio-table th { padding: 16px 24px; border-bottom: 1px solid var(--win25-border); font-size: 13px; color: #888; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; background: rgba(0,0,0,0.2); }
@@ -1188,16 +1387,16 @@ function WavyTubeContent() {
         .studio-table tr:hover td { background: rgba(255,255,255,0.03); }
         .studio-title-cell { display: flex; align-items: center; gap: 16px; }
         .studio-thumb { width: 80px; height: 45px; object-fit: cover; border-radius: 6px; flex-shrink: 0; border: 1px solid rgba(255,255,255,0.1); }
-        .playlist-badge { background: rgba(0,120,212,0.15); border: 1px solid rgba(0,120,212,0.3); color: #6ab4f5; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: 500; }
+        .playlist-badge { background: rgba(99,102,241,0.15); border: 1px solid rgba(99,102,241,0.3); color: #a5b4fc; padding: 4px 10px; border-radius: 6px; font-size: 13px; font-weight: 500; }
         .actions-cell { display: flex; gap: 10px; }
-        .btn-analytics { background: rgba(0,120,212,0.15); color: #6ab4f5; border: 1px solid rgba(0,120,212,0.3); padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; transition: 0.2s; }
-        .btn-analytics:hover { background: rgba(0,120,212,0.25); }
+        .btn-analytics { background: rgba(99,102,241,0.15); color: #a5b4fc; border: 1px solid rgba(99,102,241,0.3); padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; transition: 0.2s; }
+        .btn-analytics:hover { background: rgba(99,102,241,0.25); }
         .btn-delete { background: rgba(232,17,35,0.1); color: #ff6b6b; border: 1px solid rgba(232,17,35,0.25); padding: 8px 14px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600; transition: 0.2s; }
         .btn-delete:hover { background: rgba(232,17,35,0.2); border-color: rgba(232,17,35,0.4); }
         .analytics-modal-box-acrylic { background: var(--win25-panel-solid); border: 1px solid var(--win25-border); padding: 30px; border-radius: 16px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); }
         .chart-timeline-container { display: flex; align-items: flex-end; gap: 8px; height: 200px; background: rgba(0,0,0,0.4); padding: 24px; border-radius: 12px; overflow-x: auto; border: 1px inset rgba(255,255,255,0.05); }
         .chart-bar-node { flex: 1; min-width: 40px; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; }
-        .bar-fill-indicator { width: 100%; background: var(--win25-accent-gradient); border-radius: 4px 4px 0 0; min-height: 4px; transition: height 0.4s ease; box-shadow: 0 0 10px rgba(0,120,212,0.3); }
+        .bar-fill-indicator { width: 100%; background: var(--win25-accent-gradient); border-radius: 4px 4px 0 0; min-height: 4px; transition: height 0.4s ease; box-shadow: 0 0 10px rgba(99,102,241,0.3); }
         .bar-label-tag { font-size: 11px; color: #888; margin: 6px 0; font-weight: 500; }
         .channel-page-layout { display: flex; flex-direction: column; gap: 30px; max-width: 1200px; margin: 0 auto; width: 100%; }
         .channel-banner-acrylic { background: var(--win25-panel); border: 1px solid var(--win25-border); border-radius: 20px; padding: 40px; display: flex; align-items: center; gap: 24px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); }
@@ -1210,18 +1409,18 @@ function WavyTubeContent() {
         .upload-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 24px; }
         .upload-left, .upload-right { display: flex; flex-direction: column; gap: 16px; }
         .upload-right { background: rgba(0,0,0,0.2); border: 1px dashed rgba(255,255,255,0.15); padding: 24px; border-radius: 16px; }
-        .upload-file-zone { display: flex; align-items: center; justify-content: center; background: rgba(0,120,212,0.05); border: 2px dashed rgba(0,120,212,0.4); border-radius: 12px; padding: 24px; cursor: pointer; font-size: 16px; color: #aaa; text-align: center; transition: 0.2s; font-weight: 500; }
-        .upload-file-zone:hover { background: rgba(0,120,212,0.1); border-color: rgba(0,120,212,0.6); color: #fff; }
+        .upload-file-zone { display: flex; align-items: center; justify-content: center; background: rgba(99,102,241,0.05); border: 2px dashed rgba(99,102,241,0.4); border-radius: 12px; padding: 24px; cursor: pointer; font-size: 16px; color: #aaa; text-align: center; transition: 0.2s; font-weight: 500; }
+        .upload-file-zone:hover { background: rgba(99,102,241,0.1); border-color: rgba(99,102,241,0.6); color: #fff; }
         .upload-file-zone input { display: none; }
         .upload-input { background: rgba(0,0,0,0.4); border: 1px solid var(--win25-border); border-radius: 10px; padding: 14px 16px; color: #fff; font-size: 15px; width: 100%; outline: none; font-family: inherit; transition: 0.2s; }
-        .upload-input:focus { border-color: var(--win25-accent); background: rgba(0,0,0,0.6); box-shadow: 0 0 0 3px rgba(0,120,212,0.15); }
+        .upload-input:focus { border-color: var(--win25-accent); background: rgba(0,0,0,0.6); box-shadow: 0 0 0 3px rgba(99,102,241,0.15); }
         .upload-textarea { resize: vertical; min-height: 120px; line-height: 1.5; }
         .upload-playlist-block { background: rgba(0,0,0,0.2); border: 1px solid var(--win25-border); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
         .upload-select { width: 100%; padding: 12px 14px; background: rgba(0,0,0,0.6); border: 1px solid var(--win25-border); border-radius: 8px; color: #fff; font-size: 15px; outline: none; cursor: pointer; }
         .upload-select:focus { border-color: var(--win25-accent); }
         .upload-playlist-create { display: flex; gap: 10px; }
         .btn-create-playlist { background: var(--win25-accent); color: #fff; border: none; padding: 0 18px; border-radius: 8px; cursor: pointer; font-size: 14px; font-weight: 600; white-space: nowrap; transition: 0.2s; }
-        .btn-create-playlist:hover { background: #0086f0; }
+        .btn-create-playlist:hover { background: #4f46e5; }
         .short-toggle { display: flex; align-items: center; gap: 12px; cursor: pointer; font-size: 15px; color: #ddd; font-weight: 500; background: rgba(255,255,255,0.03); padding: 14px 16px; border-radius: 10px; border: 1px solid var(--win25-border); transition: 0.2s; }
         .short-toggle:hover { background: rgba(255,255,255,0.06); }
         .short-toggle input { width: 18px; height: 18px; accent-color: var(--win25-accent); cursor: pointer; }
@@ -1232,7 +1431,7 @@ function WavyTubeContent() {
         .upload-divider { font-size: 13px; color: #666; text-align: center; margin: 8px 0; text-transform: uppercase; letter-spacing: 1px; }
         .upload-image-input { font-size: 13px; color: #aaa; width: 100%; background: rgba(255,255,255,0.03); padding: 10px; border-radius: 8px; border: 1px dashed rgba(255,255,255,0.1); cursor: pointer; }
         .upload-processing { background: rgba(0,0,0,0.5); border: 1px solid var(--win25-border); border-radius: 12px; padding: 24px; text-align: center; display: flex; flex-direction: column; align-items: center; gap: 16px; backdrop-filter: blur(10px); }
-        .upload-processing p { margin: 0; color: #6ab4f5; font-weight: 600; font-size: 16px; }
+        .upload-processing p { margin: 0; color: #a5b4fc; font-weight: 600; font-size: 16px; }
         
         .wavy-progress-bar { width: 100%; height: 12px; background: rgba(255,255,255,0.1); border-radius: 6px; overflow: hidden; position: relative; }
         .wavy-progress-fill { height: 100%; background: var(--win25-accent-gradient); transition: width 0.3s ease; }
@@ -1240,14 +1439,14 @@ function WavyTubeContent() {
         .setting-row { display: flex; justify-content: space-between; align-items: center; font-size: 13px; color: #ccc; gap: 10px; }
         .setting-row select { width: 60%; }
 
-        .upload-spinner { width: 36px; height: 36px; border: 4px solid rgba(0,120,212,0.2); border-top-color: #0078d4; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        .upload-spinner { width: 36px; height: 36px; border: 4px solid rgba(99,102,241,0.2); border-top-color: #6366f1; border-radius: 50%; animation: spin 0.8s linear infinite; }
         @keyframes spin { to { transform: rotate(360deg) } }
         .btn-cancel-upload { background: rgba(232,17,35,0.1); color: #ff6b6b; border: 1px solid rgba(232,17,35,0.3); padding: 12px 24px; border-radius: 8px; cursor: pointer; width: 100%; font-weight: 600; font-size: 15px; transition: 0.2s; }
         .btn-cancel-upload:hover { background: rgba(232,17,35,0.2); }
-        .btn-publish { width: 100%; background: var(--win25-accent-gradient); color: #fff; border: none; padding: 16px; border-radius: 12px; cursor: pointer; font-weight: 700; font-size: 16px; letter-spacing: 0.5px; transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 8px 20px rgba(0,120,212,0.3); }
-        .btn-publish:hover { transform: translateY(-2px); box-shadow: 0 12px 24px rgba(0,120,212,0.4); }
+        .btn-publish { width: 100%; background: var(--win25-accent-gradient); color: #fff; border: none; padding: 16px; border-radius: 12px; cursor: pointer; font-weight: 700; font-size: 16px; letter-spacing: 0.5px; transition: transform 0.2s, box-shadow 0.2s; box-shadow: 0 8px 20px rgba(99,102,241,0.3); }
+        .btn-publish:hover { transform: translateY(-2px); box-shadow: 0 12px 24px rgba(99,102,241,0.4); }
         .btn-publish:disabled { opacity: 0.5; cursor: not-allowed; transform: none; box-shadow: none; }
-        .search-results-title { font-size: 16px; color: #fff; margin-bottom: 24px; background: rgba(0,120,212,0.1); border: 1px solid rgba(0,120,212,0.2); padding: 12px 20px; border-radius: 10px; font-weight: 500; }
+        .search-results-title { font-size: 16px; color: #fff; margin-bottom: 24px; background: rgba(99,102,241,0.1); border: 1px solid rgba(99,102,241,0.2); padding: 12px 20px; border-radius: 10px; font-weight: 500; }
         .mobile-only-text { display: none; }
         .desktop-only { display: flex; }
         .desktop-only-text { display: inline; }
@@ -1291,7 +1490,7 @@ function WavyTubeContent() {
           .m-icon { font-size: 22px; }
           .m-label { font-size: 10px; font-weight: 500; }
           .upload-center-btn { position: relative; top: -12px; }
-          .plus-circle { width: 48px; height: 48px; background: var(--win25-accent-gradient); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 300; box-shadow: 0 4px 16px rgba(0,120,212,0.4); }
+          .plus-circle { width: 48px; height: 48px; background: var(--win25-accent-gradient); color: white; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 28px; font-weight: 300; box-shadow: 0 4px 16px rgba(99,102,241,0.4); }
           .studio-top-bar { flex-direction: column; gap: 12px; }
           .channel-banner-acrylic { flex-direction: column; text-align: center; padding: 24px; }
           .comments-popup-panel { border-radius: 20px 20px 0 0; max-height: 85dvh; }
