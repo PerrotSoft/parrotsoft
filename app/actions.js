@@ -34,18 +34,20 @@ export async function getRawUserData(username) {
     const rawContent = rs.rows[0].data;
     try {
       const parsed = JSON.parse(rawContent);
+      if (!parsed.age) parsed.age = 12; // По умолчанию 12 лет
       if (!parsed.drive) parsed.drive = { files: [], folders: [] };
       if (!parsed.projects) parsed.projects = []; 
       return parsed;
     } catch (e) {
       return { 
         os: rawContent, 
+        age: 12,
         drive: { files: [], folders: [] },
         projects: []
       };
     }
   }
-  return { os: null, drive: { files: [], folders: [] }, projects: [] };
+  return { os: null, age: 12, drive: { files: [], folders: [] }, projects: [] };
 }
 
 export async function getGlobalSearchList() {
@@ -811,13 +813,24 @@ export async function saveVideoMetadata(videoData, analyticsData) {
   });
 
   await client.execute({
-    sql: "INSERT INTO wt_videos (id, channel_id, title, description, playlist, thumbnail, is_short, duration, timestamp, video_data) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-    args: [videoData.id, videoData.channel, videoData.title, videoData.description, videoData.playlist, videoData.thumbnail || '', videoData.is_short ? 1 : 0, videoData.duration || 0, Date.now(), '']
+    sql: "INSERT INTO wt_videos (id, channel_id, title, description, playlist, thumbnail, is_short, duration, timestamp, video_data, age_rating) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    args: [
+      videoData.id, 
+      videoData.channel, 
+      videoData.title, 
+      videoData.description || '', 
+      videoData.playlist || '', 
+      videoData.thumbnail || '', 
+      videoData.is_short ? 1 : 0, 
+      videoData.duration || 0, 
+      Date.now(), 
+      '', 
+      videoData.age_rating || '12+' // Дефолтное ограничение 12+
+    ]
   });
   
   return { success: true };
 }
-
 export async function getVideos(searchQuery = '') {
   await initWavyDB();
   // Ensure ad columns exist on wt_channels (lazily added, may not exist on older DBs)

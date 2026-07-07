@@ -12,9 +12,13 @@ export default function WavyPlayer({ videoId, duration, authorAdDevId, authorAdS
   const [showMidroll, setShowMidroll] = useState(false);
   const [adTimeLeft, setAdTimeLeft] = useState(5); 
   const [adData, setAdData] = useState(null);
-  const [adsEnabled, setAdsEnabled] = useState(false);
-  const adsEnabledRef = useRef(false);
-  useEffect(() => { adsEnabledRef.current = adsEnabled; }, [adsEnabled]);
+
+  // Держим актуальные пропсы в ref, чтобы обработчик timeupdate (созданный один раз на видео)
+  // не работал с устаревшими значениями, если пропсы поменяются без смены videoId
+  const adPropsRef = useRef({ authorAdDevId, authorAdStaticId, authorAdVideoId });
+  useEffect(() => {
+    adPropsRef.current = { authorAdDevId, authorAdStaticId, authorAdVideoId };
+  }, [authorAdDevId, authorAdStaticId, authorAdVideoId]);
 
   const getSegmentDuration = () => {
     if (!duration || duration <= 60) return 5; 
@@ -22,39 +26,30 @@ export default function WavyPlayer({ videoId, duration, authorAdDevId, authorAdS
     return 20;
   };
 
-  useEffect(() => {
-    if (!authorAdDevId) {
-      // Автор не настроил рекламный аккаунт — реклама отключена, платформа не подставляет свою
-      setAdsEnabled(false);
-      setAdData(null);
-      return;
-    }
+  // Запрашивает рекламу непосредственно в момент, когда должен показаться мидролл.
+  // Если у автора нет своего рекламного аккаунта или подходящей активной кампании нет —
+  // реклама просто отключена: ролик продолжает играть без прерывания.
+  const tryShowMidroll = async (video) => {
+    const { authorAdDevId: devId, authorAdStaticId: staticId, authorAdVideoId: videoSiteId } = adPropsRef.current;
+    if (!devId) return;
 
-    const fetchAdData = async () => {
-      try {
-        let type = authorAdVideoId ? 'video' : 'banner';
-        let siteId = type === 'video' ? authorAdVideoId : authorAdStaticId;
+    try {
+      const type = videoSiteId ? 'video' : 'banner';
+      const siteId = type === 'video' ? videoSiteId : staticId;
+      const res = await fetch(`/api/ads?action=getAd&type=${type}&devId=${devId}&siteId=${siteId || ''}`);
+      const data = await res.json();
 
-        const res = await fetch(`/api/ads?action=getAd&type=${type}&devId=${authorAdDevId}&siteId=${siteId}`);
-        const data = await res.json();
-
-        if (data && data.success && data.ad) {
-          setAdData(data.ad);
-          setAdsEnabled(true);
-        } else {
-          // Реклама не найдена — отключаем показ, без подмены на дефолтный баннер
-          setAdData(null);
-          setAdsEnabled(false);
-        }
-      } catch (e) {
-        console.error("Ошибка загрузки рекламы:", e);
-        setAdData(null);
-        setAdsEnabled(false);
+      if (data?.success && data.ad) {
+        setAdData(data.ad);
+        video.pause();
+        setAdTimeLeft(5);
+        setShowMidroll(true);
       }
-    };
-
-    fetchAdData();
-  }, [authorAdDevId, authorAdStaticId, authorAdVideoId]);
+      // Нет подходящей рекламы — ничего не делаем, видео продолжает играть без прерывания
+    } catch (e) {
+      console.error('Ошибка загрузки рекламы:', e);
+    }
+  };
 
   useEffect(() => {
     const video = videoRef.current;
@@ -77,11 +72,9 @@ export default function WavyPlayer({ videoId, duration, authorAdDevId, authorAdS
         }
       }
 
-      if (adsEnabledRef.current && currentTime > 15 && Math.floor(currentTime) % 40 === 0 && Math.floor(currentTime) !== lastAdTime.current) {
+      if (currentTime > 15 && Math.floor(currentTime) % 40 === 0 && Math.floor(currentTime) !== lastAdTime.current) {
         lastAdTime.current = Math.floor(currentTime);
-        video.pause();
-        setAdTimeLeft(5);
-        setShowMidroll(true);
+        tryShowMidroll(video);
       }
     };
 
@@ -94,7 +87,16 @@ export default function WavyPlayer({ videoId, duration, authorAdDevId, authorAdS
   useEffect(() => {
     if (!showMidroll) return;
     if (adTimeLeft <= 0) {
+      // Реклама реально показана до конца — подтверждаем показ для биллинга
+      if (adData?.payload && adData?.signature) {
+        fetch('/api/ads', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'verifyImpression', payload: adData.payload, signature: adData.signature })
+        }).catch(() => {});
+      }
       setShowMidroll(false);
+      setAdData(null);
       if (videoRef.current) videoRef.current.play().catch(() => {});
       return;
     }
@@ -104,7 +106,7 @@ export default function WavyPlayer({ videoId, duration, authorAdDevId, authorAdS
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [showMidroll, adTimeLeft]);
+  }, [showMidroll, adTimeLeft, adData]);
 
   return (
     <div className="wavy-player-wrapper" style={{ width: '100%', aspectRatio: '16/9', background: '#000', borderRadius: '12px', overflow: 'hidden', border: '1px solid rgba(255,255,255,0.1)', position: 'relative' }}>

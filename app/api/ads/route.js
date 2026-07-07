@@ -185,6 +185,42 @@ export async function GET(req) {
       return new Response(finalHtml, { headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store, no-cache' } });
     }
 
+    // 1b. ПОЛУЧЕНИЕ РЕКЛАМЫ ДЛЯ ВСТРОЕННОГО МИДРОЛЛА (используется WavyPlayer, без iframe)
+    if (action === 'getAd') {
+      const type = searchParams.get('type') || 'banner';
+      const devId = searchParams.get('devId') || '';
+      const siteId = searchParams.get('siteId') || '';
+
+      const rs = await client.execute({
+        sql: `SELECT * FROM fa_ads WHERE type = ? AND status = 'active' AND CAST(budget AS REAL) >= CAST(cpv AS REAL) ORDER BY RANDOM() LIMIT 1`,
+        args: [type]
+      });
+
+      if (rs.rows.length === 0) {
+        // Нет активных кампаний нужного типа — реклама отключена, без заглушек
+        return NextResponse.json({ success: false });
+      }
+
+      const ad = rs.rows[0];
+
+      // Токен для подтверждения показа (биллинг происходит отдельным POST после реального показа)
+      const payloadObj = { adId: ad.id, devId, siteId, ts: Date.now() };
+      const payloadBase64 = Buffer.from(JSON.stringify(payloadObj)).toString('base64');
+      const signature = crypto.createHmac('sha256', ANTI_FRAUD_SECRET).update(payloadBase64).digest('hex');
+
+      return NextResponse.json({
+        success: true,
+        ad: {
+          id: ad.id,
+          source: ad.type,
+          content_url: ad.content_url,
+          target_url: `/api/ads?action=click&adId=${ad.id}&devId=${encodeURIComponent(devId)}&siteId=${encodeURIComponent(siteId)}&target=${encodeURIComponent(ad.target_url)}`,
+          payload: payloadBase64,
+          signature
+        }
+      });
+    }
+
     // 2. ОБРАБОТКА КЛИКА (И БИЛЛИНГ ПЕРЕХОДА)
     if (action === 'click') {
       const adId = searchParams.get('adId');
