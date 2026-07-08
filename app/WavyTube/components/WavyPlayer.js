@@ -3,10 +3,11 @@
 import React, { useRef, useEffect, useState } from 'react';
 import * as actions from '../../actions';
 
-export default function WavyPlayer({ videoId, duration, authorAdDevId, authorAdStaticId, authorAdVideoId }) {
+export default function WavyPlayer({ videoId, duration, authorAdDevId, authorAdStaticId, authorAdVideoId, startAt = 0, onTimeUpdate }) {
   const videoRef = useRef(null);
   const lastLoggedSegment = useRef(-1);
-  const lastAdTime = useRef(0);
+  const lastReportedSecond = useRef(-1);
+  const hasSeekedToStart = useRef(false);
   const [errorLog, setErrorLog] = useState('');
   
   const [showMidroll, setShowMidroll] = useState(false);
@@ -25,6 +26,32 @@ export default function WavyPlayer({ videoId, duration, authorAdDevId, authorAdS
     if (duration <= 600) return 10;
     return 20;
   };
+
+  // ── Расписание мидроллов ────────────────────────────────────────────────
+  // - короче 1 минуты: рекламы нет вообще
+  // - от 1 минуты до 5:00: ровно 2 показа, делящие видео на 3 равные части
+  // - длиннее: реклама каждые 5 минут, но не меньше 2 показов суммарно
+  //   (если 5-минутный шаг даёт только 1 точку — тоже делим на 3 равные части)
+  const getMidrollSchedule = (durationSeconds) => {
+    if (!durationSeconds || durationSeconds < 60) return [];
+    const FIVE_MIN = 300;
+    if (durationSeconds < FIVE_MIN + 1) {
+      return [durationSeconds / 3, (durationSeconds / 3) * 2];
+    }
+    const schedule = [];
+    for (let t = FIVE_MIN; t < durationSeconds; t += FIVE_MIN) schedule.push(t);
+    if (schedule.length < 2) {
+      return [durationSeconds / 3, (durationSeconds / 3) * 2];
+    }
+    return schedule;
+  };
+
+  const midrollScheduleRef = useRef([]);
+  const midrollIndexRef = useRef(0);
+  useEffect(() => {
+    midrollScheduleRef.current = getMidrollSchedule(duration);
+    midrollIndexRef.current = 0;
+  }, [duration, videoId]);
 
   // Запрашивает рекламу непосредственно в момент, когда должен показаться мидролл.
   // Если у автора нет своего рекламного аккаунта или подходящей активной кампании нет —
@@ -57,6 +84,16 @@ export default function WavyPlayer({ videoId, duration, authorAdDevId, authorAdS
 
     video.src = `/api/video?id=${videoId}`;
     video.load();
+    hasSeekedToStart.current = false;
+
+    // Диплинк с таймкодом (?video=ID&t=СЕК): перематываем на нужную секунду один раз,
+    // как только станет известна длительность/метаданные видео.
+    const handleLoadedMetadata = () => {
+      if (!hasSeekedToStart.current && startAt > 0) {
+        hasSeekedToStart.current = true;
+        try { video.currentTime = startAt; } catch (e) {}
+      }
+    };
 
     const handleTimeTracking = () => {
       const currentTime = video.currentTime;
@@ -72,17 +109,27 @@ export default function WavyPlayer({ videoId, duration, authorAdDevId, authorAdS
         }
       }
 
-      if (currentTime > 15 && Math.floor(currentTime) % 40 === 0 && Math.floor(currentTime) !== lastAdTime.current) {
-        lastAdTime.current = Math.floor(currentTime);
+      // Сообщаем текущую секунду родителю (throttled раз в секунду) — используется для ссылки "Поделиться"
+      const wholeSecond = Math.floor(currentTime);
+      if (onTimeUpdate && wholeSecond !== lastReportedSecond.current) {
+        lastReportedSecond.current = wholeSecond;
+        onTimeUpdate(wholeSecond);
+      }
+
+      const schedule = midrollScheduleRef.current;
+      if (midrollIndexRef.current < schedule.length && currentTime >= schedule[midrollIndexRef.current]) {
+        midrollIndexRef.current += 1;
         tryShowMidroll(video);
       }
     };
 
+    video.addEventListener('loadedmetadata', handleLoadedMetadata);
     video.addEventListener('timeupdate', handleTimeTracking);
     return () => {
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata);
       video.removeEventListener('timeupdate', handleTimeTracking);
     };
-  }, [videoId, duration]);
+  }, [videoId, duration, startAt]);
 
   useEffect(() => {
     if (!showMidroll) return;

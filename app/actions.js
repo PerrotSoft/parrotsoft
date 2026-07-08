@@ -10,6 +10,22 @@ const client = createClient({
 async function ensureTables() {
   await client.execute(`CREATE TABLE IF NOT EXISTS users (username TEXT PRIMARY KEY, data TEXT)`);
 }
+
+// ── Возраст аккаунта ────────────────────────────────────────────────────────
+// Считаем возраст по дате рождения каждый раз заново (а не берём один раз сохранённое
+// число) — иначе возраст "застывает" на момент регистрации и не растёт с годами/днём рождения.
+// Если дата некорректна/не задана — 12 лет по умолчанию (безопасное консервативное значение,
+// ограничивающее доступ к 18+/эротическому контенту).
+function computeAgeFromBirthDate(birthDate) {
+  const birth = new Date(birthDate);
+  if (isNaN(birth.getTime())) return 12;
+  const now = new Date();
+  let age = now.getFullYear() - birth.getFullYear();
+  const monthDiff = now.getMonth() - birth.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < birth.getDate())) age--;
+  return age >= 0 ? age : 12;
+}
+
 export async function syncDocs(username, docsData) {
   'use server';
   const userData = await getRawUserData(username);
@@ -25,6 +41,22 @@ export async function getDocs(username) {
   const data = await getRawUserData(username);
   return data.docs || [];
 }
+
+
+export async function setUserBirthDate(username, birthDate) {
+  'use server';
+  if (!username) return { error: 'no_username' };
+  await ensureTables();
+  const userData = await getRawUserData(username);
+  const age = computeAgeFromBirthDate(birthDate);
+  userData.birthDate = birthDate;
+  userData.age = age;
+  await client.execute({
+    sql: "INSERT INTO users (username, data) VALUES (?, ?) ON CONFLICT(username) DO UPDATE SET data = excluded.data",
+    args: [String(username), JSON.stringify(userData)]
+  });
+  return { success: true, age };
+}
 export async function getRawUserData(username) {
   const rs = await client.execute({
     sql: "SELECT data FROM users WHERE username = ?",
@@ -34,7 +66,22 @@ export async function getRawUserData(username) {
     const rawContent = rs.rows[0].data;
     try {
       const parsed = JSON.parse(rawContent);
-      if (!parsed.age) parsed.age = 12; // По умолчанию 12 лет
+      
+      // Перередактирование / перенос данных: если параметра нет в корне пользователя, но он есть в ОС
+      if (!parsed.birthDate && parsed.os) {
+        let osBirth = null;
+        if (typeof parsed.os === 'object' && parsed.os !== null) {
+          osBirth = parsed.os.birthDate;
+        } else if (typeof parsed.os === 'string') {
+          try {
+            const pOs = JSON.parse(parsed.os);
+            osBirth = pOs?.birthDate;
+          } catch (e) {}
+        }
+        if (osBirth) parsed.birthDate = osBirth;
+      }
+
+      parsed.age = parsed.birthDate ? computeAgeFromBirthDate(parsed.birthDate) : (parsed.age || 12);
       if (!parsed.drive) parsed.drive = { files: [], folders: [] };
       if (!parsed.projects) parsed.projects = []; 
       return parsed;
@@ -43,11 +90,98 @@ export async function getRawUserData(username) {
         os: rawContent, 
         age: 12,
         drive: { files: [], folders: [] },
+        birthDate: null,
         projects: []
       };
     }
   }
   return { os: null, age: 12, drive: { files: [], folders: [] }, projects: [] };
+}
+
+export async function getUserAgeInfo(username) {
+  'use server';
+  if (!username) return { age: 12, birthDate: null };
+  const rs = await client.execute({ sql: "SELECT data FROM users WHERE username = ?", args: [String(username)] });
+  if (rs.rows.length === 0 || !rs.rows[0].data) return { age: 12, birthDate: null };
+  try {
+    const parsed1 = JSON.parse(rs.rows[0].data);
+    
+    // Ищем параметр сначала на уровне пользователя, если нет — во внутренней ОС
+    let birthDate = parsed1.birthDate;
+    if (!birthDate && parsed1.os) {
+      if (typeof parsed1.os === 'object' && parsed1.os !== null) {
+        birthDate = parsed1.os.birthDate;
+      } else if (typeof parsed1.os === 'string') {
+        try {
+          const pOs = JSON.parse(parsed1.os);
+          birthDate = pOs?.birthDate;
+        } catch (e) {}
+      }
+    }
+
+    if (birthDate) {
+      return { age: computeAgeFromBirthDate(birthDate), birthDate };
+    }
+    
+    let age = parsed1.age;
+    if (!age && parsed1.os) {
+      if (typeof parsed1.os === 'object' && parsed1.os !== null) {
+        age = parsed1.os.age;
+      } else if (typeof parsed1.os === 'string') {
+        try {
+          const pOs = JSON.parse(parsed1.os);
+          age = pOs?.age;
+        } catch (e) {}
+      }
+    }
+    return { age: age || 12, birthDate: null };
+  } catch (e) {
+    return { age: 12, birthDate: null };
+  }
+}
+
+export async function onSync(username, osData, birthDate = null) {
+  await ensureTables();
+  const userData = await getRawUserData(username);
+  userData.os = osData;
+  
+  // Параметр может редактироваться во внешней части (birthDate) или внутри ОС (внутри osData)
+  let finalBirthDate = birthDate;
+  if (!finalBirthDate && osData) {
+    if (typeof osData === 'object' && osData !== null) {
+      finalBirthDate = osData.birthDate;
+    } else if (typeof osData === 'string') {
+      try {
+        const parsedOs = JSON.parse(osData);
+        finalBirthDate = parsedOs?.birthDate;
+      } catch (e) {}
+    }
+  }
+
+  if (finalBirthDate) {
+    userData.birthDate = finalBirthDate;
+    userData.age = computeAgeFromBirthDate(finalBirthDate);
+  } else if (!userData.birthDate && userData.os) {
+    // Перередактирование, если параметра нет в корне, но он сохранился внутри ОС
+    let osBirth = null;
+    if (typeof userData.os === 'object' && userData.os !== null) {
+      osBirth = userData.os.birthDate;
+    } else if (typeof userData.os === 'string') {
+      try {
+        const parsedOs = JSON.parse(userData.os);
+        osBirth = parsedOs?.birthDate;
+      } catch (e) {}
+    }
+    if (osBirth) {
+      userData.birthDate = osBirth;
+      userData.age = computeAgeFromBirthDate(osBirth);
+    }
+  }
+
+  await client.execute({
+    sql: "INSERT INTO users (username, data) VALUES (?, ?) ON CONFLICT(username) DO UPDATE SET data = excluded.data",
+    args: [String(username), JSON.stringify(userData)]
+  });
 }
 
 export async function getGlobalSearchList() {
@@ -97,16 +231,16 @@ export async function getProjects(username) {
   return (await getRawUserData(username)).projects || [];
 }
 
-export async function onSync(username, osData) {
+export async function setAge(username, age, birthDate = null) {
   await ensureTables();
   const userData = await getRawUserData(username);
-  userData.os = osData;
+  userData.age = age;
+  userData.birthDate = birthDate;
   await client.execute({
     sql: "INSERT INTO users (username, data) VALUES (?, ?) ON CONFLICT(username) DO UPDATE SET data = excluded.data",
     args: [String(username), JSON.stringify(userData)]
   });
 }
-
 export async function syncDrive(username, driveData) {
   await ensureTables();
   const userData = await getRawUserData(username);
@@ -781,7 +915,7 @@ export async function pdb_delete(username, dbId) {
 
 export async function initWavyDB() {
   await client.execute(`CREATE TABLE IF NOT EXISTS wt_channels (username TEXT PRIMARY KEY, avatar TEXT, description TEXT, subscribers INTEGER DEFAULT 0, owner_account TEXT DEFAULT '', icon TEXT DEFAULT '', display_name TEXT DEFAULT '')`);
-  await client.execute(`CREATE TABLE IF NOT EXISTS wt_videos (id TEXT PRIMARY KEY, channel_id TEXT, title TEXT, description TEXT, playlist TEXT DEFAULT '', likes INTEGER DEFAULT 0, dislikes INTEGER DEFAULT 0, views INTEGER DEFAULT 0, duration REAL DEFAULT 0, thumbnail TEXT, is_short INTEGER DEFAULT 0, timestamp INTEGER, video_data TEXT)`);
+  await client.execute(`CREATE TABLE IF NOT EXISTS wt_videos (id TEXT PRIMARY KEY, channel_id TEXT, title TEXT, description TEXT, playlist TEXT DEFAULT '', likes INTEGER DEFAULT 0, dislikes INTEGER DEFAULT 0, views INTEGER DEFAULT 0, duration REAL DEFAULT 0, thumbnail TEXT, is_short INTEGER DEFAULT 0, timestamp INTEGER, video_data TEXT, age_rating TEXT DEFAULT '12+', is_explicit INTEGER DEFAULT 0)`);
   await client.execute(`CREATE TABLE IF NOT EXISTS wt_subs (subscriber TEXT, channel TEXT, PRIMARY KEY (subscriber, channel))`);
   await client.execute(`CREATE TABLE IF NOT EXISTS wt_likes (username TEXT, video_id TEXT, type TEXT, PRIMARY KEY (username, video_id))`);
   await client.execute(`CREATE TABLE IF NOT EXISTS wt_comments (id TEXT PRIMARY KEY, video_id TEXT, username TEXT, text TEXT, timestamp INTEGER)`);
@@ -800,6 +934,9 @@ export async function initWavyDB() {
     if (!cols.includes('views')) await client.execute("ALTER TABLE wt_videos ADD COLUMN views INTEGER DEFAULT 0");
     if (!cols.includes('timestamp')) await client.execute("ALTER TABLE wt_videos ADD COLUMN timestamp INTEGER DEFAULT 0");
     if (!cols.includes('video_data')) await client.execute("ALTER TABLE wt_videos ADD COLUMN video_data TEXT DEFAULT ''");
+    // Возрастной рейтинг видео (по умолчанию 12+) и флаг эротического/18+ контента
+    if (!cols.includes('age_rating')) await client.execute("ALTER TABLE wt_videos ADD COLUMN age_rating TEXT DEFAULT '12+'");
+    if (!cols.includes('is_explicit')) await client.execute("ALTER TABLE wt_videos ADD COLUMN is_explicit INTEGER DEFAULT 0");
   } catch(e) { console.error("WavyDB Video Migration error: ", e); }
 }
 
@@ -813,7 +950,7 @@ export async function saveVideoMetadata(videoData, analyticsData) {
   });
 
   await client.execute({
-    sql: "INSERT INTO wt_videos (id, channel_id, title, description, playlist, thumbnail, is_short, duration, timestamp, video_data, age_rating) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    sql: "INSERT INTO wt_videos (id, channel_id, title, description, playlist, thumbnail, is_short, duration, timestamp, video_data, age_rating, is_explicit) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     args: [
       videoData.id, 
       videoData.channel, 
@@ -825,7 +962,8 @@ export async function saveVideoMetadata(videoData, analyticsData) {
       videoData.duration || 0, 
       Date.now(), 
       '', 
-      videoData.age_rating || '12+' // Дефолтное ограничение 12+
+      videoData.age_rating || '12+', // Дефолтное ограничение 12+
+      videoData.is_explicit ? 1 : 0  // Флаг эротического/18+ контента
     ]
   });
   
@@ -840,7 +978,7 @@ export async function getVideos(searchQuery = '') {
   }
   let rs;
   // КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ ДЛЯ СКОРОСТИ: НЕ ЗАГРУЖАЕМ video_data ПРИ ОТКРЫТИИ ЛЕНТЫ! (Снижает загрузку с 10+ сек до <1 сек)
-  const columns = "v.id, v.channel_id, v.title, v.description, v.playlist, v.likes, v.dislikes, v.views, v.duration, v.thumbnail, v.is_short, v.timestamp, c.ad_dev_id as ad_dev_id, c.ad_static_site_id as ad_static_site_id, c.ad_video_site_id as ad_video_site_id";
+  const columns = "v.id, v.channel_id, v.title, v.description, v.playlist, v.likes, v.dislikes, v.views, v.duration, v.thumbnail, v.is_short, v.timestamp, v.age_rating, v.is_explicit, c.ad_dev_id as ad_dev_id, c.ad_static_site_id as ad_static_site_id, c.ad_video_site_id as ad_video_site_id";
   const joinSql = `FROM wt_videos v LEFT JOIN wt_channels c ON c.username = v.channel_id`;
 
   if (searchQuery) {
@@ -848,7 +986,12 @@ export async function getVideos(searchQuery = '') {
   } else {
     rs = await client.execute(`SELECT ${columns} ${joinSql} ORDER BY v.timestamp DESC`);
   }
-  return toPlain(rs.rows).map(v => ({...v, channel: v.channel_id}));
+  return toPlain(rs.rows).map(v => ({
+    ...v,
+    channel: v.channel_id,
+    age_rating: v.age_rating || '12+',
+    is_explicit: Number(v.is_explicit) === 1,
+  }));
 }
 
 export async function incrementViews(videoId) {
@@ -977,6 +1120,25 @@ export async function createPlaylist(name, username) {
   const id = 'pl_' + Math.random().toString(36).substring(2, 10);
   await client.execute({ sql: "INSERT INTO wt_playlists (id, name, username) VALUES (?, ?, ?)", args: [id, name, username] });
   return id;
+}
+
+export async function searchChannels(query) {
+  await initWavyDB();
+  if (!query || !query.trim()) return [];
+  const q = `%${query.trim()}%`;
+  const rs = await client.execute({
+    sql: "SELECT username, display_name, avatar, icon, subscribers FROM wt_channels WHERE username LIKE ? OR display_name LIKE ? ORDER BY subscribers DESC LIMIT 20",
+    args: [q, q]
+  });
+  return toPlain(rs.rows);
+}
+
+export async function getPlaylistById(playlistId) {
+  await initWavyDB();
+  if (!playlistId) return null;
+  const rs = await client.execute({ sql: "SELECT * FROM wt_playlists WHERE id = ?", args: [playlistId] });
+  if (rs.rows.length === 0) return null;
+  return toPlain(rs.rows)[0];
 }
 
 export async function getVideoAnalytics(videoId) {

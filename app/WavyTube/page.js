@@ -336,6 +336,7 @@ function WavyTubeContent() {
   const [globalRecs, setGlobalRecs] = useState([]);
   const [comments, setComments]   = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const [channelSearchResults, setChannelSearchResults] = useState([]);
   const [isShort, setIsShort]     = useState(false);
   const [analyticsVideo, setAnalyticsVideo] = useState(null);
   const [mockSegmentData, setMockSegmentData] = useState([]);
@@ -370,6 +371,29 @@ function WavyTubeContent() {
   const shortsRefs = useRef([]);
   const lastFetchRef = useRef(0);
 
+  // ── Возрастная система ──────────────────────────────────────────────────
+  // Пока возраст зрителя не загружен с сервера — считаем его 12 (безопасный дефолт),
+  // чтобы 18+/эротический контент не мелькал до проверки.
+  const [viewerAge, setViewerAge] = useState(12);
+  const [ageLoaded, setAgeLoaded] = useState(false);
+  const [showExplicit, setShowExplicit] = useState(false);
+  const [uploadAgeRating, setUploadAgeRating] = useState('12+');
+  const [uploadIsExplicit, setUploadIsExplicit] = useState(false);
+  const [contentLoaded, setContentLoaded] = useState(false);
+  const [currentPlaybackSeconds, setCurrentPlaybackSeconds] = useState(0);
+  const [deepLinkStartAt, setDeepLinkStartAt] = useState(0);
+  const [selectedPlaylistInfo, setSelectedPlaylistInfo] = useState(null);
+  const deepLinkAppliedRef = useRef(false);
+
+  // Проверка: можно ли показать/воспроизвести это видео зрителю
+  const isVideoAllowed = (video) => {
+    if (!video) return false;
+    const requiredAge = parseInt(video.age_rating, 10) || 0;
+    if (viewerAge < requiredAge) return false;
+    if (video.is_explicit && !showExplicit) return false;
+    return true;
+  };
+
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const pUser = localStorage.getItem('p_user') || '';
@@ -378,7 +402,89 @@ function WavyTubeContent() {
     setAccountKey(pToken);
     loadMyChannels(pUser, pToken);
     loadContent(true);
+
+    // Загружаем возраст зрителя (12 по умолчанию, если аккаунт не указал дату рождения)
+    if (pUser && actions.getUserAgeInfo) {
+      actions.getUserAgeInfo(pUser).then(info => {
+        setViewerAge(info?.age ?? 12);
+        setAgeLoaded(true);
+      }).catch(() => setAgeLoaded(true));
+      const savedExplicitPref = localStorage.getItem(`wt_show_explicit_${pUser}`);
+      setShowExplicit(savedExplicitPref === '1');
+    } else {
+      setAgeLoaded(true);
+    }
   }, []);
+
+  const toggleShowExplicit = () => {
+    const next = !showExplicit;
+    setShowExplicit(next);
+    if (accountId) localStorage.setItem(`wt_show_explicit_${accountId}`, next ? '1' : '0');
+  };
+
+  // ── Ссылки для шаринга (?video=, ?channel=, ?playlist=, опционально &t=) ──
+  const copyShareLink = ({ video, channel, playlist, t } = {}) => {
+    if (typeof window === 'undefined') return;
+    const url = new URL(window.location.href);
+    ['video', 'channel', 'playlist', 'search', 'upload', 'studio', 'tab', 't'].forEach(k => url.searchParams.delete(k));
+    if (video) {
+      url.searchParams.set('video', video);
+      if (t && t > 3) url.searchParams.set('t', Math.floor(t));
+    } else if (channel) {
+      url.searchParams.set('channel', channel);
+    } else if (playlist) {
+      url.searchParams.set('playlist', playlist);
+    }
+    const finalUrl = url.toString();
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(finalUrl)
+        .then(() => alert('🔗 Ссылка скопирована в буфер обмена:\n' + finalUrl))
+        .catch(() => window.prompt('Скопируйте ссылку вручную:', finalUrl));
+    } else {
+      window.prompt('Скопируйте ссылку вручную:', finalUrl);
+    }
+  };
+
+  // ── Обработка диплинков (?video=, ?playlist=, ?channel=, ?search=, ?upload, ?studio, &t=) ──
+  // Применяется один раз, как только контент и возраст зрителя загружены.
+  useEffect(() => {
+    if (deepLinkAppliedRef.current) return;
+    if (!contentLoaded || !ageLoaded) return;
+    deepLinkAppliedRef.current = true;
+
+    const videoParam = searchParams.get('video');
+    const playlistParam = searchParams.get('playlist');
+    const channelParam = searchParams.get('channel');
+    const searchParam = searchParams.get('search');
+    const tParam = parseFloat(searchParams.get('t'));
+
+    if (videoParam) {
+      const found = videos.find(v => v.id === videoParam);
+      if (found) {
+        playVideo(found, !isNaN(tParam) ? tParam : 0);
+        return;
+      }
+    }
+    if (playlistParam) {
+      actions.getPlaylistById(playlistParam).then(pl => {
+        if (pl) { setSelectedPlaylistInfo(pl); setActiveTab('playlist-view'); }
+      });
+      return;
+    }
+    if (channelParam) {
+      setSelectedChannelName(channelParam);
+      setActiveTab('channel-view');
+      return;
+    }
+    if (searchParam) {
+      setSearchQuery(searchParam);
+      setActiveTab('home');
+      return;
+    }
+    if (searchParams.has('upload')) { setActiveTab('upload'); return; }
+    if (searchParams.has('studio')) { setActiveTab('studio'); return; }
+    // иначе остаётся то, что уже определено параметром ?tab= (или 'home' по умолчанию)
+  }, [contentLoaded, ageLoaded, videos]);
 
   const loadMyChannels = async (accId, accKey) => {
     if (!accId) { setChannelsLoading(false); return; }
@@ -435,6 +541,7 @@ function WavyTubeContent() {
         lastFetchRef.current = Date.now();
       }
     } catch(e) { console.error(e); }
+    setContentLoaded(true);
   };
 
   const switchChannel = (ch) => {
@@ -478,7 +585,17 @@ function WavyTubeContent() {
     }
   };
 
-  const playVideo = async (video) => {
+  const playVideo = async (video, startAtSeconds = 0) => {
+    if (!isVideoAllowed(video)) {
+      const requiredAge = parseInt(video?.age_rating, 10) || 0;
+      if (video?.is_explicit && !showExplicit) {
+        alert('🔞 Это видео помечено как эротический контент. Включите его показ в меню слева (доступно с 18 лет), чтобы посмотреть.');
+      } else {
+        alert(`🔒 Это видео доступно только с ${requiredAge}+ лет.`);
+      }
+      return;
+    }
+    setDeepLinkStartAt(startAtSeconds || 0);
     setActiveVideo(video); setActiveTab('watch');
     if (video.id) {
       await actions.incrementViews(video.id);
@@ -507,14 +624,20 @@ function WavyTubeContent() {
       setSelectedFile(file); 
       setLocalVideoUrl(URL.createObjectURL(file)); 
       setThumbDataUrl(null);
+      setPreviewFrameReady(false);
       setTrimStart('');
       setTrimEnd('');
     }
   };
 
+  const [previewFrameReady, setPreviewFrameReady] = useState(false);
+
   const captureFrameFromVideo = () => {
     const video = previewVideoRef.current;
-    if (!video) return;
+    if (!video || !video.videoWidth || !video.videoHeight) {
+      alert('Видео ещё загружается, подождите секунду и попробуйте снова.');
+      return;
+    }
     const canvas = document.createElement('canvas');
     canvas.width = video.videoWidth; canvas.height = video.videoHeight;
     canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
@@ -582,15 +705,25 @@ function WavyTubeContent() {
         args.push('-vf', `scale=${compressScale}`);
       }
 
+      // VP8 полностью свободен от лицензионных отчислений (в отличие от H.264/AVC),
+      // поэтому кодируем в WebM/VP8. Пресеты x264 (ultrafast/veryfast/...) переносим
+      // на аналог libvpx: -deadline + -cpu-used (чем выше cpu-used, тем быстрее и грубее).
+      const vp8SpeedParams = {
+        ultrafast: { deadline: 'realtime', cpuUsed: '16' },
+        veryfast:  { deadline: 'good',     cpuUsed: '8'  },
+        fast:      { deadline: 'good',     cpuUsed: '4'  },
+        medium:    { deadline: 'good',     cpuUsed: '0'  },
+      }[compressLevel] || { deadline: 'good', cpuUsed: '8' };
+
       args.push(
         '-threads', '0',
-        '-c:v', 'libx264',
+        '-c:v', 'libvpx',
         '-b:v', compressBitrate,
-        '-preset', compressLevel,
-        '-c:a', 'aac',
+        '-deadline', vp8SpeedParams.deadline,
+        '-cpu-used', vp8SpeedParams.cpuUsed,
+        '-c:a', 'libvorbis',
         '-b:a', compressAudio,
-        '-movflags', '+faststart',
-        'output.mp4'
+        'output.webm'
       );
 
       const exitCode = await ffmpeg.exec(args);
@@ -599,8 +732,8 @@ function WavyTubeContent() {
       }
 
       setUploadStatus('Обработка завершена! Подготовка видео...');
-      const data = await ffmpeg.readFile('output.mp4');
-      const fastStartBlob = new Blob([data.buffer], { type: 'video/mp4' });
+      const data = await ffmpeg.readFile('output.webm');
+      const fastStartBlob = new Blob([data.buffer], { type: 'video/webm' });
 
       const maxSize = isShort ? 35 * 1024 * 1024 : 200 * 1024 * 1024;
       if (fastStartBlob.size > maxSize) {
@@ -625,7 +758,9 @@ function WavyTubeContent() {
             title: uploadTitle, description: uploadDesc,
             playlist: selectedPlaylist, thumbnail: thumbDataUrl,
             is_short: isShort, duration: videoDuration,
-            ad_dev_id: currentChannel.ad_dev_id
+            ad_dev_id: currentChannel.ad_dev_id,
+            age_rating: uploadIsExplicit ? '18+' : uploadAgeRating,
+            is_explicit: uploadIsExplicit
           }, { tags: '', audience_type: 'general' });
 
           setUploadStatus('Начало загрузки сегментов...');
@@ -661,6 +796,7 @@ function WavyTubeContent() {
             setUploadTitle(''); setUploadDesc(''); setSelectedFile(null);
             setLocalVideoUrl(null); setThumbDataUrl(null); setIsProcessing(false);
             setTrimStart(''); setTrimEnd(''); setFfmpegProgress(0);
+            setUploadAgeRating('12+'); setUploadIsExplicit(false);
             loadContent(true); setActiveTab('home');
           }, 1500);
         } catch (err) {
@@ -695,11 +831,25 @@ function WavyTubeContent() {
   };
 
   const filteredVideos = globalRecs.filter(v =>
-    v.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    v.playlist?.toLowerCase().includes(searchQuery.toLowerCase())
+    isVideoAllowed(v) && (
+      v.title?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      v.playlist?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      v.channel?.toLowerCase().includes(searchQuery.toLowerCase())
+    )
   );
 
-  const shortsList = videos.filter(v => v.is_short || v.playlist === 'Shorts').sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  // Поиск каналов по названию (с debounce, чтобы не долбить сервер на каждое нажатие клавиши)
+  useEffect(() => {
+    if (!searchQuery.trim()) { setChannelSearchResults([]); return; }
+    const t = setTimeout(() => {
+      actions.searchChannels(searchQuery).then(setChannelSearchResults).catch(() => setChannelSearchResults([]));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [searchQuery]);
+
+  const shortsList = videos
+    .filter(v => (v.is_short || v.playlist === 'Shorts') && isVideoAllowed(v))
+    .sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
   const chIcon = (ch) => {
     if (!ch) return '?';
@@ -742,6 +892,16 @@ function WavyTubeContent() {
             </button>
           ))}
         </nav>
+
+        {ageLoaded && viewerAge >= 18 && (
+          <div className="explicit-toggle-box">
+            <span>🔞 Показывать эротический контент</span>
+            <label className="explicit-toggle-switch">
+              <input type="checkbox" checked={showExplicit} onChange={toggleShowExplicit} />
+              <span className="explicit-toggle-slider" />
+            </label>
+          </div>
+        )}
 
         <div className="channels-manager">
           <div className="channels-manager-header">
@@ -825,6 +985,8 @@ function WavyTubeContent() {
                     authorAdDevId={activeVideo.ad_dev_id}
                     authorAdStaticId={activeVideo.ad_static_site_id}
                     authorAdVideoId={activeVideo.ad_video_site_id}
+                    startAt={deepLinkStartAt}
+                    onTimeUpdate={(sec) => setCurrentPlaybackSeconds(sec)}
                   />
                 </div>
                 <div className="video-details-card">
@@ -833,6 +995,7 @@ function WavyTubeContent() {
                     <div className="action-buttons">
                       <button className="like-btn" onClick={() => toggleLike('like')}>👍 {activeVideo.likes || 0}</button>
                       <button className="like-btn" onClick={() => toggleLike('dislike')}>👎 {activeVideo.dislikes || 0}</button>
+                      <button className="like-btn" onClick={() => copyShareLink({ video: activeVideo.id, t: currentPlaybackSeconds })}>🔗 Поделиться</button>
                       <span className="views-count">👁 {activeVideo.views || 0}</span>
                     </div>
                   </div>
@@ -860,7 +1023,7 @@ function WavyTubeContent() {
 
               <div className="watch-side-column">
                 <RecommendationSystem 
-                  videos={videos} 
+                  videos={videos.filter(isVideoAllowed)} 
                   currentVideo={activeVideo} 
                   onPlay={playVideo} 
                   onSelectChannel={(ch) => { setSelectedChannelName(ch); setActiveTab('channel-view'); }}
@@ -872,6 +1035,27 @@ function WavyTubeContent() {
           {activeTab === 'home' && (
             <div className="home-layout">
               {searchQuery && <div className="search-results-title">Поиск: «{searchQuery}»</div>}
+
+              {searchQuery && channelSearchResults.length > 0 && (
+                <div className="channel-search-results">
+                  {channelSearchResults.map(ch => (
+                    <div
+                      key={ch.username}
+                      className="channel-search-card"
+                      onClick={() => { setSelectedChannelName(ch.username); setActiveTab('channel-view'); }}
+                    >
+                      <div className="channel-search-avatar">
+                        {ch.avatar ? <img src={ch.avatar} alt={ch.username} /> : (ch.icon || ch.username[0]?.toUpperCase())}
+                      </div>
+                      <div>
+                        <h4>{ch.display_name || ch.username}</h4>
+                        <p>@{ch.username} · {ch.subscribers || 0} подписчиков</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               {filteredVideos.length === 0 ? (
                 <div className="empty-state">
                   <span style={{ fontSize: 40 }}>📭</span>
@@ -886,6 +1070,7 @@ function WavyTubeContent() {
                         <div className="thumbnail-wrapper">
                           {video.thumbnail ? <img src={video.thumbnail} alt={video.title} /> : <video src={`/api/video?id=${video.id}`} preload="metadata" muted playsInline style={{width:'100%', height:'100%', objectFit:'cover', position:'absolute'}} />}
                           <span className="duration-tag">{video.is_short ? '⚡ Short' : 'HD'}</span>
+                          {video.is_explicit && <span className="age-badge">18+</span>}
                         </div>
                         <div className="card-info">
                           <h3>{video.title}</h3>
@@ -1034,17 +1219,49 @@ function WavyTubeContent() {
             <div className="channel-page-layout">
               <div className="channel-banner-acrylic">
                 <div className="channel-profile-avatar-big">{selectedChannelName[0]}</div>
-                <div className="channel-profile-meta-big">
+                <div className="channel-profile-meta-big" style={{flex: 1}}>
                   <h2>{selectedChannelName}</h2>
                   <p style={{color:'#888',margin:'4px 0 0'}}>{videos.filter(v=>v.channel===selectedChannelName).length} видео</p>
                 </div>
+                <button className="open-comments-btn" onClick={() => copyShareLink({ channel: selectedChannelName })}>🔗 Поделиться</button>
               </div>
               <div className="channel-tab-title">Видео автора</div>
               <div className="videos-compact-grid">
-                {videos.filter(v=>v.channel===selectedChannelName).map(video=>(
+                {videos.filter(v=>v.channel===selectedChannelName && isVideoAllowed(v)).map(video=>(
                   <div key={video.id} className="wavy-video-card" onClick={()=>playVideo(video)}>
                     <div className="thumbnail-wrapper">
                       {video.thumbnail ? <img src={video.thumbnail} alt={video.title}/> : <div style={{width:'100%', height:'100%', background:'#222'}} />}
+                      {video.is_explicit && <span className="duration-tag" style={{background:'#e84545'}}>18+</span>}
+                    </div>
+                    <div className="card-info">
+                      <h3>{video.title}</h3>
+                      <div className="card-stats"><span>👁 {video.views||0} просмотров</span></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {activeTab === 'playlist-view' && selectedPlaylistInfo && (
+            <div className="channel-page-layout">
+              <div className="channel-banner-acrylic">
+                <div className="channel-profile-avatar-big">📁</div>
+                <div className="channel-profile-meta-big" style={{flex: 1}}>
+                  <h2>{selectedPlaylistInfo.name}</h2>
+                  <p style={{color:'#888',margin:'4px 0 0'}}>
+                    {videos.filter(v => v.playlist === selectedPlaylistInfo.name && v.channel === selectedPlaylistInfo.username).length} видео
+                  </p>
+                </div>
+                <button className="open-comments-btn" onClick={() => copyShareLink({ playlist: selectedPlaylistInfo.id })}>🔗 Поделиться</button>
+              </div>
+              <div className="channel-tab-title">Видео плейлиста</div>
+              <div className="videos-compact-grid">
+                {videos.filter(v => v.playlist === selectedPlaylistInfo.name && v.channel === selectedPlaylistInfo.username && isVideoAllowed(v)).map(video=>(
+                  <div key={video.id} className="wavy-video-card" onClick={()=>playVideo(video)}>
+                    <div className="thumbnail-wrapper">
+                      {video.thumbnail ? <img src={video.thumbnail} alt={video.title}/> : <div style={{width:'100%', height:'100%', background:'#222'}} />}
+                      {video.is_explicit && <span className="duration-tag" style={{background:'#e84545'}}>18+</span>}
                     </div>
                     <div className="card-info">
                       <h3>{video.title}</h3>
@@ -1132,13 +1349,57 @@ function WavyTubeContent() {
                           <input type="checkbox" checked={isShort} onChange={e=>setIsShort(e.target.checked)} />
                           <span>⚡ Формат Short (Макс 10 мин, 720x1280)</span>
                         </label>
+
+                        <div className="upload-playlist-block">
+                          <label style={{fontSize:12,color:'#aaa',display:'block',marginBottom:8}}>Возрастное ограничение</label>
+                          <select
+                            value={uploadIsExplicit ? '18+' : uploadAgeRating}
+                            onChange={e=>setUploadAgeRating(e.target.value)}
+                            className="upload-select"
+                            disabled={uploadIsExplicit}
+                          >
+                            <option value="0+">0+ (Для всех)</option>
+                            <option value="12+">12+</option>
+                            <option value="16+">16+</option>
+                            <option value="18+">18+</option>
+                          </select>
+                          <label className="short-toggle" style={{marginTop:10}}>
+                            <input
+                              type="checkbox"
+                              checked={uploadIsExplicit}
+                              onChange={e=>{ setUploadIsExplicit(e.target.checked); if (e.target.checked) setUploadAgeRating('18+'); }}
+                            />
+                            <span>🔞 Эротический контент (доступен только зрителям 18+, включившим показ такого контента)</span>
+                          </label>
+                        </div>
                       </div>
                       <div className="upload-right">
                         <h3 style={{margin:'0 0 12px',fontSize:14,color:'#aaa'}}>Обложка</h3>
                         {localVideoUrl ? (
                           <>
-                            <video ref={previewVideoRef} src={localVideoUrl} controls className="upload-preview-video" />
-                            <button type="button" onClick={captureFrameFromVideo} className="btn-capture-frame">📸 Кадр как обложка</button>
+                            <video 
+                              ref={previewVideoRef} 
+                              src={localVideoUrl} 
+                              controls 
+                              preload="auto"
+                              className="upload-preview-video"
+                              onLoadedData={() => {
+                                const v = previewVideoRef.current;
+                                // Некоторые браузеры не рендерят кадр, пока не сделан хотя бы небольшой seek —
+                                // без этого превью/захват обложки оставались пустыми (0x0 канвас).
+                                if (v && v.currentTime === 0) { try { v.currentTime = 0.1; } catch(e) {} }
+                                setPreviewFrameReady(true);
+                              }}
+                              onSeeked={() => setPreviewFrameReady(true)}
+                            />
+                            <button 
+                              type="button" 
+                              onClick={captureFrameFromVideo} 
+                              className="btn-capture-frame"
+                              disabled={!previewFrameReady}
+                            >
+                              {previewFrameReady ? '📸 Кадр как обложка' : '⏳ Видео загружается...'}
+                            </button>
                           </>
                         ) : <div className="upload-video-placeholder">Выберите видео</div>}
                         <div className="upload-divider">или загрузите изображение</div>
@@ -1292,6 +1553,21 @@ function WavyTubeContent() {
         .thumbnail-wrapper { position: relative; aspect-ratio: 16/9; background: #121316; }
         .thumbnail-wrapper img, .thumbnail-wrapper video { width: 100%; height: 100%; object-fit: cover; position: absolute; top: 0; left: 0; }
         .duration-tag { position: absolute; bottom: 8px; right: 8px; background: rgba(0,0,0,0.8); color: #fff; font-size: 11px; padding: 4px 8px; border-radius: 6px; z-index: 10; font-weight: 600; }
+        .age-badge { position: absolute; top: 8px; left: 8px; background: #e84545; color: #fff; font-size: 11px; padding: 4px 8px; border-radius: 6px; z-index: 10; font-weight: 700; }
+        .channel-search-results { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+        .channel-search-card { display: flex; align-items: center; gap: 14px; padding: 12px 16px; background: rgba(255,255,255,0.04); border: 1px solid var(--win25-border); border-radius: 14px; cursor: pointer; transition: 0.15s; }
+        .channel-search-card:hover { background: rgba(255,255,255,0.08); }
+        .channel-search-avatar { width: 44px; height: 44px; border-radius: 50%; background: var(--win25-accent); display: flex; align-items: center; justify-content: center; font-weight: 700; color: #fff; overflow: hidden; flex-shrink: 0; }
+        .channel-search-avatar img { width: 100%; height: 100%; object-fit: cover; }
+        .channel-search-card h4 { margin: 0; font-size: 14px; }
+        .channel-search-card p { margin: 2px 0 0; font-size: 12px; color: #888; }
+        .explicit-toggle-box { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 16px; margin: 0 16px 12px; background: rgba(232,69,69,0.08); border: 1px solid rgba(232,69,69,0.25); border-radius: 12px; font-size: 13px; color: #eee; }
+        .explicit-toggle-switch { position: relative; width: 40px; height: 22px; flex-shrink: 0; }
+        .explicit-toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .explicit-toggle-slider { position: absolute; cursor: pointer; inset: 0; background: rgba(255,255,255,0.15); border-radius: 22px; transition: 0.2s; }
+        .explicit-toggle-slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background: #fff; border-radius: 50%; transition: 0.2s; }
+        .explicit-toggle-switch input:checked + .explicit-toggle-slider { background: #e84545; }
+        .explicit-toggle-switch input:checked + .explicit-toggle-slider:before { transform: translateX(18px); }
         .card-info { padding: 14px; }
         .card-info h3 { margin: 0 0 6px 0; font-size: 15px; line-height: 1.4; color: #fff; }
         .card-channel { margin: 0 0 8px 0; font-size: 13px; color: var(--win25-text-dim); }

@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
-
-export default function ClientInterface({ children, serverDB, onSync, dbActions }) {
+import { onSync } from './actions';
+export default function ClientInterface({ children, serverDB,  dbActions }) {
     const [user, setUser] = useState(null);
     const [isAuth, setIsAuth] = useState(false);
     const [loading, setLoading] = useState(true);
@@ -9,11 +9,37 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
     const [modalOpen, setModalOpen] = useState(false);
     const [view, setView] = useState('main');
     const [draggedIdx, setDraggedIdx] = useState(null);
+
+    const handleAppReorder = async (dropIdx) => {
+        if (draggedIdx === null || draggedIdx === dropIdx || !user?.apps) {
+            setDraggedIdx(null);
+            return;
+        }
+        const newApps = [...user.apps];
+        const [moved] = newApps.splice(draggedIdx, 1);
+        newApps.splice(dropIdx, 0, moved);
+        setDraggedIdx(null);
+        await sync({ ...user, apps: newApps });
+    };
     const [authMode, setAuthMode] = useState('login');
-    const [form, setForm] = useState({ username: '', pass: '' });
+    const [form, setForm] = useState({ username: '', pass: '', birthDate: '' });
     const [newApp, setNewApp] = useState({ name: '', icon: '🌐', url: '' });
-    const [editForm, setEditForm] = useState({ pass: '', avatar: '' });
+    const [editForm, setEditForm] = useState({ pass: '', avatar: '', birthDate: '' });
     const [balance, setBalance] = useState(0);
+    const [is18Confirmed, setIs18Confirmed] = useState(false);
+
+    // Считаем возраст по дате рождения на клиенте — только для мгновенного отображения.
+    // Официальный источник истины — возраст, посчитанный и сохранённый на сервере (setUserBirthDate).
+    const calcAge = (birthDateStr) => {
+        if (!birthDateStr) return null;
+        const birth = new Date(birthDateStr);
+        if (isNaN(birth.getTime())) return null;
+        const now = new Date();
+        let age = now.getFullYear() - birth.getFullYear();
+        const m = now.getMonth() - birth.getMonth();
+        if (m < 0 || (m === 0 && now.getDate() < birth.getDate())) age--;
+        return age >= 0 ? age : 0;
+    };
 
     const cryptoAction = (key, input, mode = 'enc') => {
         try {
@@ -48,6 +74,12 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
             dbActions.getBalance(username).then(setBalance);
         }
     }, [user]);
+    useEffect(() => {
+        if (view === 'settings' && user) {
+            setEditForm({ pass: '', avatar: user.avatar || '', birthDate: user.birthDate || '' });
+            setIs18Confirmed(false);
+        }
+    }, [view, user]);
     useEffect(() => {
         const init = async () => {
             const savedName = localStorage.getItem('p_user');
@@ -111,44 +143,48 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
         }
     }
 };
-    const handleAuth = async (e) => {
-        e.preventDefault();
-        const token = await generateKey(form.pass);
-        const name = form.username.trim();
+const handleAuth = async (e) => {
+    e.preventDefault();
+    const token = await generateKey(form.pass);
+    const name = form.username.trim();
 
-        if (authMode === 'register') {
-            if (serverDB[name]) return alert("Username taken!");
-            const newUser = {
-                balance: balance,
-                apps: [
-                        { id: '1', name: 'Search', icon: '🔍', url: '/' },
-                        { id: '2', name: 'Settings', icon: '⚙️', url: 'sys:settings' },
-                        { id: '3', name: 'Drive', icon: '📂', url: '/drive' },
-                        { id: '4', name: 'DataPedia', icon: '📄', url: '/datapedia' },
-                        { id: '5', name: 'WavyChat', icon: '💬', url: '/WavyChat' },
-                        { id: '6', name: 'Web-PStudio', icon: '💻', url: 'https://pstudio-nine.vercel.app/' },
-                        { id: '7', name: 'ParrotOS Installer', icon: '💻', url: '/installer' },
-                        { id: '8', name: 'ParrotOS Pley', icon: '💻', url: '/parrotplay' },
-                        { id: '9', name: 'ParrotOS DB Manager', icon: '📂', url: '/db-manager' },
-                        { id: '10', name: 'WavyTube', icon: '📺', url: '/WavyTube' }
-                    ],
-                avatar: ""
-            };
-            await onSync(name, cryptoAction(token, newUser, 'enc'));
-            complete(name, token, newUser);
-        } else {
-            const entry = serverDB[name];
-            if (!entry) return alert("User not found!");
-            let rawData = entry.data || entry;
-            try {
-                const parsed = JSON.parse(rawData);
-                if (parsed.os) rawData = parsed.os;
-            } catch (e) {}
-            const data = cryptoAction(token, rawData, 'dec');
-            if (data) complete(name, token, data);
-            else alert("Wrong password!");
-        }
-    };
+    if (authMode === 'register') {
+        if (serverDB[name]) return alert("Username taken!");
+        if (!form.birthDate) return alert("Укажите дату рождения!");
+        const newUser = {
+            balance: balance,
+            birthDate: form.birthDate,
+            apps: [
+                    { id: '1', name: 'Search', icon: '🔍', url: '/' },
+                    { id: '2', name: 'Settings', icon: '⚙️', url: 'sys:settings' },
+                    { id: '3', name: 'Drive', icon: '📂', url: '/drive' },
+                    { id: '4', name: 'DataPedia', icon: '📄', url: '/datapedia' },
+                    { id: '5', name: 'WavyChat', icon: '💬', url: '/WavyChat' },
+                    { id: '6', name: 'Web-PStudio', icon: '💻', url: 'https://pstudio-nine.vercel.app/' },
+                    { id: '7', name: 'ParrotOS Installer', icon: '💻', url: '/installer' },
+                    { id: '8', name: 'ParrotOS Pley', icon: '💻', url: '/parrotplay' },
+                    { id: '9', name: 'ParrotOS DB Manager', icon: '📂', url: '/db-manager' },
+                    { id: '10', name: 'WavyTube', icon: '📺', url: '/WavyTube' }
+                ],
+            avatar: ""
+        };
+        
+        await onSync(name, cryptoAction(token, newUser, 'enc'), form.birthDate);
+        
+        complete(name, token, newUser);
+    } else {
+        const entry = serverDB[name];
+        if (!entry) return alert("User not found!");
+        let rawData = entry.data || entry;
+        try {
+            const parsed = JSON.parse(rawData);
+            if (parsed.os) rawData = parsed.os;
+        } catch (e) {}
+        const data = cryptoAction(token, rawData, 'dec');
+        if (data) complete(name, token, data);
+        else alert("Wrong password!");
+    }
+};
 
     const complete = (n, t, d) => {
         localStorage.setItem('p_user', n);
@@ -159,7 +195,7 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
 
     const sync = async (updated) => {
         const { username, token, ...pure } = updated;
-        await onSync(username, cryptoAction(token, pure, 'enc'));
+        await onSync(username, cryptoAction(token, pure, 'enc'), updated.birthDate);
         setUser(updated);
     };
     if (loading) return (
@@ -260,6 +296,23 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
                 <form onSubmit={handleAuth} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
                     <input className="inp-v1" placeholder="Username" required onChange={e => setForm({...form, username: e.target.value})} style={{ background: 'rgba(255,255,255,0.05)', color: 'black' }} />
                     <input className="inp-v1" type="password" placeholder="Password" required onChange={e => setForm({...form, pass: e.target.value})} style={{ background: 'rgba(255,255,255,0.05)', color: 'black' }} />
+                    {authMode === 'register' && (
+                        <div style={{ textAlign: 'left' }}>
+                            <label style={{ fontSize: 12, opacity: 0.6, display: 'block', marginBottom: 4 }}>Дата рождения</label>
+                            <input
+                                className="inp-v1"
+                                type="date"
+                                required
+                                max={new Date().toISOString().split('T')[0]}
+                                value={form.birthDate}
+                                onChange={e => setForm({ ...form, birthDate: e.target.value })}
+                                style={{ background: 'rgba(255,255,255,0.05)', color: 'black', width: '100%' }}
+                            />
+                            <p style={{ fontSize: 11, opacity: 0.5, margin: '4px 0 0' }}>
+                                Нужна для возрастных ограничений контента. Если не указать, аккаунту по умолчанию будет присвоено 12 лет.
+                            </p>
+                        </div>
+                    )}
                     <button type="submit" className="btn-v4" style={{ marginTop: '10px' }}>Sign In</button>
                 </form>
                 <p style={{ marginTop: '20px', fontSize: '12px', opacity: 0.5, cursor: 'pointer', textDecoration: 'underline', color: 'black' }} onClick={() => setAuthMode(authMode === 'login' ? 'register' : 'login')}>
@@ -283,7 +336,6 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
                 .app-card:hover .del-app { opacity: 1; }
                 .animate-in { animation: slideUp 0.4s cubic-bezier(0, 0.55, 0.45, 1); }
                 @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-                /* Обновление основного контейнера лаунчера */
 .launcher-grid { 
     position: fixed; 
     top: 75px; 
@@ -294,19 +346,14 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
     z-index: 999; 
     display: flex; 
     flex-direction: column;
-    max-height: 85vh; /* Не выходит за пределы экрана */
+    max-height: 85vh; 
     overflow: hidden;
 }
-
-/* Контейнер для списка приложений с прокруткой */
 .launcher-scroll-area {
     overflow-y: auto;
     padding-right: 5px;
-    /* Ограничитель 3х5: высота примерно 5 рядов по 95px */
     max-height: 475px; 
 }
-
-/* Стилизация полосы прокрутки (тонкий скролл) */
 .launcher-scroll-area::-webkit-scrollbar {
     width: 4px;
 }
@@ -332,15 +379,14 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
 
             {launcherOpen && (
                 <div className="block-v1 launcher-grid animate-in" style={{ border: '1px solid var(--border-light)', boxShadow: 'var(--shadow-elevated)' }}>
-                    {/* Обертка для прокрутки */}
                     <div className="launcher-scroll-area">
                         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '15px' }}>
                             {user.apps.map((app, i) => (
-                                <div key={app.id} className="app-card" draggable onDragStart={() => setDraggedIdx(i)} onDragOver={e => e.preventDefault()} onDrop={() => onDrop(i)}>
+                                <div key={app.id} className="app-card" draggable onDragStart={() => setDraggedIdx(i)} onDragEnd={() => setDraggedIdx(null)} onDragOver={e => e.preventDefault()} onDrop={() => handleAppReorder(i)}>
                                     <button className="del-app" onClick={(e) => { e.stopPropagation(); sync({...user, apps: user.apps.filter(a => a.id !== app.id)}); }}>×</button>
                                     <div className="app-icon" style={{ width: 60, height: 60, background: 'white', borderRadius: 16, display: 'flex', justifyContent: 'center', alignItems: 'center', fontSize: 26, boxShadow: 'var(--shadow-flat)', cursor: 'pointer' }} onClick={() => {
                                         if(app.url === 'sys:settings') setView('settings');
-                                        else window.location.href = app.url;
+                                        else if (app.url) window.location.href = app.url;
                                         setLauncherOpen(false);
                                     }}>{app.icon}</div>
                                     <span style={{ fontSize: 10, fontWeight: 600, textAlign: 'center' }}>{app.name}</span>
@@ -348,8 +394,6 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
                             ))}
                         </div>
                     </div>
-                    
-                    {/* Кнопка добавления остается за пределами скролла, чтобы всегда быть на виду */}
                     <button className="btn-v4" style={{ width: '100%', marginTop: 20, borderRadius: 12 }} onClick={() => { setModalOpen(true); setLauncherOpen(false); }}>+ Shortcut</button>
                 </div>
             )}
@@ -410,9 +454,47 @@ export default function ClientInterface({ children, serverDB, onSync, dbActions 
                             {user.avatar ? <img src={user.avatar} style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : user.username[0].toUpperCase()}
                         </div>
                         <input className="inp-v1" placeholder="Avatar URL" value={editForm.avatar} onChange={e => setEditForm({...editForm, avatar: e.target.value})} style={{ marginBottom: 15 }} />
+                        <div style={{ textAlign: 'left', marginBottom: 15 }}>
+                            <label style={{ fontSize: 12, opacity: 0.6, display: 'block', marginBottom: 4 }}>Дата рождения</label>
+                            <input
+                                className="inp-v1"
+                                type="date"
+                                max={new Date().toISOString().split('T')[0]}
+                                value={editForm.birthDate}
+                                onChange={e => setEditForm({ ...editForm, birthDate: e.target.value })}
+                                style={{ width: '100%' }}
+                            />
+                            {editForm.birthDate && calcAge(editForm.birthDate) !== null && (
+                                <p style={{ fontSize: 11, opacity: 0.5, margin: '4px 0 0' }}>Возраст: {calcAge(editForm.birthDate)} лет</p>
+                            )}
+                            {calcAge(editForm.birthDate) >= 18 && calcAge(user.birthDate) < 18 && (
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '10px' }}>
+                                    <input 
+                                        type="checkbox" 
+                                        id="confirm_18" 
+                                        checked={is18Confirmed} 
+                                        onChange={e => setIs18Confirmed(e.target.checked)} 
+                                    />
+                                    <label htmlFor="confirm_18" style={{ fontSize: 12, opacity: 0.8, cursor: 'pointer' }}>
+                                        Подтверждаю, что мне действительно есть 18 лет
+                                    </label>
+                                </div>
+                            )}
+                        </div>
                         <input className="inp-v1" type="password" placeholder="New Password" onChange={e => setEditForm({...editForm, pass: e.target.value})} style={{ marginBottom: 20 }} />
                         <button className="btn-v4" style={{ width: '100%', marginBottom: 10 }} onClick={async () => {
                             let updated = { ...user, avatar: editForm.avatar || user.avatar };
+                            if (editForm.birthDate) {
+                                const newAge = calcAge(editForm.birthDate);
+                                const oldAge = calcAge(user.birthDate);
+                                if (newAge >= 18 && oldAge < 18 && !is18Confirmed) {
+                                    return alert("Пожалуйста, подтвердите галочкой, что вам действительно есть 18 лет!");
+                                }
+                                updated.birthDate = editForm.birthDate;
+                                if (dbActions?.setUserBirthDate) {
+                                    await dbActions.setUserBirthDate(user.username, editForm.birthDate);
+                                }
+                            }
                             if (editForm.pass) {
                                 updated.token = await generateKey(editForm.pass);
                                 localStorage.setItem('p_token', updated.token);

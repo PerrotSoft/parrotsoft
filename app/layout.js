@@ -60,11 +60,17 @@ export async function getProjects(username) {
   const data = await getRawUserData(username);
   return data.projects || [];
 }
-export async function onSync(username, osData) {
-  'use server';
+// 1. actions.js — Обнови функцию onSync, чтобы она принимала дату третьим аргументом:
+export async function onSync(username, osData, birthDate = null) {
   await ensureTables();
   const userData = await getRawUserData(username);
   userData.os = osData;
+  
+  if (birthDate) {
+    userData.birthDate = birthDate;
+    userData.age = computeAgeFromBirthDate(birthDate);
+  }
+
   await client.execute({
     sql: "INSERT INTO users (username, data) VALUES (?, ?) ON CONFLICT(username) DO UPDATE SET data = excluded.data",
     args: [String(username), JSON.stringify(userData)]
@@ -278,7 +284,6 @@ export default async function RootLayout({ children }) {
       <body>
         <ClientInterface 
           serverDB={users} 
-          onSync={onSync}
           dbActions={{ 
             syncDrive, 
             getUserFiles, 
