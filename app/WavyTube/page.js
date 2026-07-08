@@ -1359,6 +1359,9 @@ function WavyTubeContent() {
                             disabled={uploadIsExplicit}
                           >
                             <option value="0+">0+ (Для всех)</option>
+                            <option value="3+">3+</option>
+                            <option value="7+">7+</option>
+                            <option value="10+">10+</option>
                             <option value="12+">12+</option>
                             <option value="16+">16+</option>
                             <option value="18+">18+</option>
