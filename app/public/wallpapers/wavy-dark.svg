@@ -1,0 +1,66 @@
+<svg width="1920" height="1080" viewBox="0 0 1920 1080" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a0a12"/>
+      <stop offset="55%" stop-color="#12101f"/>
+      <stop offset="100%" stop-color="#0d0d16"/>
+    </linearGradient>
+    <linearGradient id="blobGrad1" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#18c4e8"/>
+      <stop offset="45%" stop-color="#6d5bf0"/>
+      <stop offset="100%" stop-color="#a742e0"/>
+    </linearGradient>
+    <linearGradient id="blobGrad2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#7b3fe4"/>
+      <stop offset="100%" stop-color="#2a9fe0"/>
+    </linearGradient>
+    <radialGradient id="glowPurple" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#8a4ff0" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#8a4ff0" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glowBlue" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#1fc8ea" stop-opacity="0.3"/>
+      <stop offset="100%" stop-color="#1fc8ea" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="softBlur"><feGaussianBlur stdDeviation="18"/></filter>
+  </defs>
+
+  <rect width="1920" height="1080" fill="url(#bgGrad)"/>
+
+  <circle cx="260" cy="820" r="360" fill="url(#glowPurple)"/>
+  <circle cx="1680" cy="180" r="420" fill="url(#glowBlue)"/>
+  <circle cx="1500" cy="900" r="280" fill="url(#glowPurple)"/>
+
+  <path d="M -100 760
+           C 180 640, 340 900, 560 780
+           C 780 660, 900 460, 1180 520
+           C 1420 570, 1560 380, 1820 420
+           L 1820 1180 L -100 1180 Z"
+        fill="url(#blobGrad1)" opacity="0.9"/>
+
+  <path d="M -100 900
+           C 220 820, 420 1000, 660 900
+           C 900 800, 1080 640, 1360 700
+           C 1560 745, 1680 620, 1820 660
+           L 1820 1180 L -100 1180 Z"
+        fill="url(#blobGrad2)" opacity="0.55" filter="url(#softBlur)"/>
+
+  <g fill="none" stroke="#ffffff" stroke-opacity="0.16" stroke-width="2">
+    <path d="M -50 300 C 300 220, 500 420, 820 330 C 1100 250, 1300 400, 1600 300"/>
+    <path d="M -50 380 C 320 480, 560 260, 880 380 C 1150 480, 1400 300, 1970 400"/>
+    <path d="M 200 120 C 420 200, 600 60, 900 140 C 1150 200, 1350 60, 1600 140"/>
+  </g>
+
+  <g fill="none" stroke="#ffffff" stroke-opacity="0.28" stroke-width="2.5">
+    <path d="M 40 640 C 160 560, 260 700, 400 650 C 520 610, 600 700, 720 660"/>
+  </g>
+
+  <circle cx="150" cy="640" r="34" fill="#8a4ff0"/>
+  <circle cx="360" cy="560" r="20" fill="#2a9fe0"/>
+  <circle cx="620" cy="700" r="26" fill="#c15be8"/>
+  <circle cx="1040" cy="200" r="22" fill="#5b7cf0"/>
+  <circle cx="1300" cy="260" r="16" fill="#9a5cf0"/>
+  <circle cx="1780" cy="760" r="30" fill="#7b3fe4"/>
+  <circle cx="1620" cy="880" r="18" fill="#2ec8ea"/>
+  <circle cx="90" cy="200" r="14" fill="#6d5bf0" opacity="0.8"/>
+</svg>

@@ -1,0 +1,42 @@
+{
+  "_readme": "Базовый конфиг сайта. Правка этого файла = обычный деплой. Всё, что должно меняться на лету без передеплоя (например, комиссию прямо во время работы сайта), храните через живой слой поверх этого файла — actions.js: getLiveConfig()/setLiveConfigValue() (пишут в таблицу site_config_kv). См. app/lib/siteConfig.js: mergeConfig() объединяет то и другое, живые значения побеждают.",
+  "ads": {
+    "_comment": "Честное колесо на 4 сектора для показа рекламы. video участвует только в мидролле (полноэкранный плеер) — см. pickAdCategory() в lib/siteConfig.js",
+    "adSplit": {
+      "video": 37,
+      "gif": 37,
+      "bannerAdsterra": 12.5,
+      "bannerOwn": 12.5
+    },
+    "minAdSeconds": 10,
+    "staticRotateSeconds": 5,
+    "prerollChance": 0.5,
+    "midrollRotateGifChance": 0.4,
+    "feedAdEveryN": 5,
+    "adsterraGifUrl": "https://landings-cdn.adsterratech.com/referralBanners/gif/600x250_adsterra_reff.gif",
+    "platformDevId": "Icfg",
+    "defaultBannerSiteId": "adsterra_default",
+    "defaultGifSiteId": "adsterra_gif",
+    "defaultVideoSiteId": "default_video",
+    "defaultStaticSiteId": "default_static",
+    "adsterraClickTarget": "https://adsterra.com",
+    "adIntensity": "normal"
+  },
+  "economy": {
+    "_comment": "PayCoin-экономика — сама система переводов/баланса ещё не реализована, это только объявленная ставка по умолчанию на будущее.",
+    "commissionRate": 0.5
+  },
+  "limits": {
+    "_comment": "Лимиты аккаунта. Меняешь здесь — меняется и в клиентской проверке (WavyTube), и в серверной (actions.js createAccountChannel), т.к. оба читают один и тот же конфиг.",
+    "maxChannelsPerAccount": 5,
+    "maxCommentLength": 2000,
+    "maxPostTextLength": 5000,
+    "driveQuotaBytes": 104857600
+  },
+  "features": {
+    "_comment": "Флаги-включатели крупных возможностей сайта. false — полностью выключает соответствующую кнопку/раздел в интерфейсе, не только прячет.",
+    "guestModeEnabled": true,
+    "postsEnabled": true,
+    "totpEnabled": true
+  }
+}

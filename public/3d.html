@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>V-PRO 15.1 BLENDER EDITION | SCULPT & TEXTURES</title>
+    <script type="importmap">
+        { "imports": { "three": "https://unpkg.com/three@0.160.0/build/three.module.js", "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/" } }
+    </script>
+    <style>
+         :root {
+            --b0: #020202;
+            --b1: #0a0a0a;
+            --b2: #151515;
+            --b3: #1e1e1e;
+            --accent: #ff7300;
+            --accent-bright: #ffa600;
+            --sculpt: #ff0044;
+            --text: #ffffff;
+            --text-dim: #888;
+            --panel-w: 320px;
+            --header-h: 45px;
+            --footer-h: 110px;
+        }
+        
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Inter', sans-serif; }
+        body { background: var(--b0); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; font-size: 11px; }
+        
+        header {
+            height: var(--header-h);
+            background: var(--b2);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 15px;
+            border-bottom: 1px solid #000;
+            z-index: 1000;
+        }
+
+        .logo { font-weight: 900; color: var(--accent); letter-spacing: 1px; }
+        
+        .workspace-tabs { display: flex; gap: 5px; height: 100%; align-items: flex-end; }
+        .tab {
+            background: var(--b1); border: 1px solid #000; border-bottom: none;
+            color: var(--text-dim); padding: 8px 15px; cursor: pointer;
+            border-radius: 6px 6px 0 0; font-weight: 700; font-size: 10px;
+        }
+        .tab.active { background: var(--b3); color: var(--accent); border-top: 2px solid var(--accent); }
+        .tab#mode-sculpt.active { color: var(--sculpt); border-top: 2px solid var(--sculpt); }
+
+        .header-actions { display: flex; gap: 10px; }
+
+        #main-layout { display: flex; flex: 1; overflow: hidden; position: relative; }
+        
+        .toolbar {
+            width: 45px; background: var(--b2); border-right: 1px solid #000;
+            display: flex; flex-direction: column; align-items: center; padding-top: 10px; gap: 5px; z-index: 1000;
+        }
+        
+        .tool-btn {
+            width: 32px; height: 32px; background: var(--b3); border: 1px solid #333;
+            color: var(--text); border-radius: 5px; cursor: pointer; font-size: 14px;
+            display: flex; align-items: center; justify-content: center; transition: 0.2s;
+        }
+        .tool-btn:hover { border-color: var(--accent); background: #1a1a1a; }
+        .tool-btn.active { border-color: var(--accent); color: var(--accent); background: #2b1700; }
+        .tool-sep { height: 1px; width: 25px; background: #333; margin: 4px 0; }
+        
+        #viewport-container { flex: 1; position: relative; background: #000; overflow: hidden; }
+        #viewport { width: 100%; height: 100%; outline: none; }
+        #st-fps { position: absolute; top: 15px; left: 15px; color: var(--accent); font-family: monospace; font-size: 11px; pointer-events: none; z-index: 10; }
+        
+        #view-controls { position: absolute; top: 15px; right: 15px; display: flex; gap: 5px; z-index: 10; }
+        #camera-frame { display: none; position: absolute; inset: 0; border: 2px solid var(--accent); pointer-events: none; z-index: 100; box-shadow: inset 0 0 100px rgba(0,0,0,0.8); }
+        
+        .sidebar { width: var(--panel-w); background: var(--b1); border-left: 1px solid #000; display: flex; flex-direction: column; z-index: 1050; }
+        .side-scroll { flex: 1; overflow-y: auto; overflow-x: hidden; }
+        
+        .section-h { background: var(--b3); padding: 10px 15px; font-size: 10px; text-transform: uppercase; color: var(--accent); font-weight: 900; border-bottom: 1px solid #000; border-top: 1px solid #333; }
+        .prop-box { padding: 15px; border-bottom: 1px solid #1a1a1a; }
+        .prop-row { display: grid; grid-template-columns: 75px 1fr; gap: 6px; margin-bottom: 10px; align-items: center; }
+        .prop-row-3 { display: grid; grid-template-columns: 75px 1fr 1fr 1fr; gap: 6px; margin-bottom: 10px; align-items: center; }
+        .prop-row label, .prop-row-3 label { color: var(--text-dim); font-size: 9px; font-weight: 800; }
+        
+        input[type="number"], input[type="text"], select { background: #000; border: 1px solid #333; color: var(--accent); padding: 6px; border-radius: 4px; width: 100%; outline: none; font-size: 10px; font-family: monospace; }
+        input[type="range"] { width: 100%; accent-color: var(--accent); }
+        
+        .outliner { height: 150px; background: #050505; margin: 10px; border: 1px solid #222; overflow-y: auto; border-radius: 4px; }
+        .out-item { padding: 8px 12px; border-bottom: 1px solid #111; cursor: pointer; color: #aaa; }
+        .out-item:hover { background: #111; color: #fff; }
+        .out-item.active { color: var(--accent); background: #1a1a1a; border-left: 3px solid var(--accent); }
+        
+        footer { height: var(--footer-h); background: var(--b1); border-top: 1px solid #000; display: flex; flex-direction: column; z-index: 1100; }
+        .tl-header { height: 40px; border-bottom: 1px solid #000; display: flex; align-items: center; padding: 0 15px; gap: 10px; }
+        .tl-body { flex: 1; padding: 10px 20px; background: #050505; position: relative; }
+        .tl-track { height: 35px; background: #111; border: 1px solid #252525; position: relative; cursor: pointer; border-radius: 4px; }
+        .playhead { position: absolute; top: -5px; bottom: -5px; width: 2px; background: #ff0044; z-index: 10; pointer-events: none; }
+        
+        .btn { background: var(--b3); border: 1px solid #444; color: #fff; padding: 7px 15px; border-radius: 5px; cursor: pointer; font-size: 10px; font-weight: 700; transition: 0.2s; display: inline-flex; align-items: center; justify-content: center; }
+        .btn:hover { background: #333; border-color: var(--accent); }
+        .btn-primary { background: var(--accent); color: #000; border: none; }
+        .btn-primary:hover { background: var(--accent-bright); }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="logo">V-PRO 15.1</div>
+        <div class="workspace-tabs">
+            <button class="tab active" id="mode-object" onclick="app.setMode('OBJECT')">Object</button>
+            <button class="tab" id="mode-edit" onclick="app.setMode('EDIT')">Edit (Vertex)</button>
+            <button class="tab" id="mode-sculpt" onclick="app.setMode('SCULPT')">Sculpt</button>
+            <button class="tab" id="mode-render" onclick="app.setMode('RENDER')">Render / Cam</button>
+            <button class="tab" onclick="app.setMode('SCULPT')">Sculpt</button>
+        </div>
+        <div class="header-actions">
+            <button class="btn" onclick="app.exportOBJ()">Export OBJ</button>
+            <label class="btn btn-primary" style="cursor: pointer;">
+                Import Model <input type="file" hidden id="file-import" accept=".glb,.gltf,.obj">
+            </label>
+        </div>
+    </header>
+
+    <div id="main-layout">
+        <div class="toolbar">
+            <button class="tool-btn active" id="g-translate" onclick="app.setGizmoMode('translate')" title="Translate">✛</button>
+            <button class="tool-btn" id="g-rotate" onclick="app.setGizmoMode('rotate')" title="Rotate">↻</button>
+            <button class="tool-btn" id="g-scale" onclick="app.setGizmoMode('scale')" title="Scale">⤇</button>
+            <div class="tool-sep"></div>
+            <button class="tool-btn" onclick="app.addObject('cube')" title="Add Cube">📦</button>
+            <button class="tool-btn" onclick="app.addObject('sphere')" title="Add High-Poly Sphere">🌐</button>
+            <button class="tool-btn" onclick="app.addLight('point')" title="Add Light">💡</button>
+        </div>
+
+        <div id="viewport-container">
+            <div id="st-fps">FPS: 60</div>
+            <div id="view-controls">
+                <button class="btn" onclick="app.focusSelected()">⌖ Focus</button>
+                <button class="btn" onclick="app.resetCamera()">⟲ Reset</button>
+            </div>
+            <div id="camera-frame"></div>
+            <div id="viewport" tabindex="0"></div>
+        </div>
+
+        <aside class="sidebar">
+            <div class="side-scroll">
+                
+                <div id="panel-object">
+                    <div class="section-h">Hierarchy</div>
+                    <div class="outliner" id="ui-outliner"></div>
+
+                    <div class="section-h">Transform</div>
+                    <div class="prop-box">
+                        <div class="prop-row-3"><label>Loc</label><input type="number" id="tr-px" step="0.1"><input type="number" id="tr-py" step="0.1"><input type="number" id="tr-pz" step="0.1"></div>
+                        <div class="prop-row-3"><label>Rot</label><input type="number" id="tr-rx" step="1"><input type="number" id="tr-ry" step="1"><input type="number" id="tr-rz" step="1"></div>
+                        <div class="prop-row-3"><label>Scl</label><input type="number" id="tr-sx" step="0.1"><input type="number" id="tr-sy" step="0.1"><input type="number" id="tr-sz" step="0.1"></div>
+                    </div>
+
+                    <div id="mat-settings">
+                        <div class="section-h">Material</div>
+                        <div class="prop-box">
+                            <div class="prop-row"><label>Color</label><input type="color" id="mat-color" value="#888888"></div>
+                            <div class="prop-row" style="margin-top: 10px;">
+                                <label>Texture</label>
+                                <label class="btn" style="width: 100%; cursor: pointer;">
+                                    Load Image <input type="file" hidden id="file-texture" accept="image/*">
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="panel-edit" style="display: none;">
+                    <div class="section-h">Mesh Tools</div>
+                    <div class="prop-box">
+                        <p style="color:var(--text-dim); font-size:9px; margin-bottom: 10px;">Select a vertex (orange sphere) to move it.</p>
+                        <button class="btn btn-primary" onclick="app.subdivideSelected()">⚄ SUBDIVIDE MESH</button>
+                    </div>
+                    <div class="prop-box">
+                        <button class="btn" onclick="app.setEditSubMode('vertex')">Вершины</button>
+                        <button class="btn" onclick="app.setEditSubMode('edge')">Ребра</button>
+                        <button class="btn" onclick="app.setEditSubMode('face')">Грани</button>
+                    </div>
+                </div>
+
+                <div id="panel-sculpt" style="display: none;">
+                    <div class="section-h" style="color: var(--sculpt);">Sculpt Settings</div>
+                    <div class="prop-box">
+                        <p style="color:var(--text-dim); font-size:9px; margin-bottom: 10px;">Click and drag to sculpt. Hold <b>Shift</b> to subtract.</p>
+                        <div class="prop-row">
+                            <label>Size</label>
+                            <input type="range" id="sculpt-size" min="0.5" max="10" step="0.1" value="3">
+                        </div>
+                        <div class="prop-row">
+                            <label>Strength</label>
+                            <input type="range" id="sculpt-strength" min="0.01" max="1" step="0.01" value="0.2">
+                        </div>
+                    </div>
+                </div>
+
+                <div id="panel-render" style="display: none;">
+                    <div class="section-h">Rendering</div>
+                    <div class="prop-box" style="display: flex; flex-direction: column; gap: 10px;">
+                        <button class="btn btn-primary" onclick="app.renderImage()">📸 CAPTURE PNG</button>
+                    </div>
+                </div>
+
+            </div>
+        </aside>
+    </div>
+
+    <footer>
+        <div class="tl-header">
+            <button class="btn" id="play-btn" onclick="app.togglePlayback()">▶ Play</button>
+            <div style="margin-left: auto; display: flex; align-items: center; gap: 10px;">
+                <span style="color: var(--text-dim); font-weight: 800;">FRAME</span>
+                <div id="ui-frame-box" style="background: #000; padding: 4px 12px; border-radius: 4px; border: 1px solid #333; color: var(--accent); font-family: monospace;">0</div>
+            </div>
+        </div>
+        <div class="tl-body">
+            <div class="tl-track" id="ui-track"><div class="playhead" id="ui-playhead"></div></div>
+        </div>
+    </footer>
+
+    <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { TransformControls } from 'three/addons/controls/TransformControls.js';
+    import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+    import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
+
+    class VProEngine {
+        constructor() {
+            this.init();
+            this.setupUI();
+            this.animate();
+        }
+
+        init() {
+            this.scene = new THREE.Scene();
+            this.scene.background = new THREE.Color(0x0a0a0a);
+            const container = document.getElementById('viewport');
+            
+            this.camera = new THREE.PerspectiveCamera(50, container.clientWidth / container.clientHeight, 0.1, 5000);
+            this.camera.position.set(50, 50, 50);
+
+            this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+            this.renderer.setSize(container.clientWidth, container.clientHeight);
+            this.renderer.setPixelRatio(window.devicePixelRatio);
+            this.renderer.shadowMap.enabled = true;
+            container.appendChild(this.renderer.domElement);
+
+            // Состояние движка
+            this.objects = [];
+            this.sceneCameras = [];
+            this.lights = [];
+            this.selected = null;
+            this.selectedElements = []; // Для хранения выбранных граней/ребер
+            this.mode = 'OBJECT'; 
+            this.editSubMode = 'vertex'; // vertex, edge, face
+            
+            // Скульптинг
+            this.isSculpting = false;
+            this.sculptSettings = { radius: 8, strength: 0.5, invert: false };
+
+            // Свет и сетка
+            this.scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+            this.addLight('directional');
+            this.grid = new THREE.GridHelper(200, 50, 0x222222, 0x111111);
+            this.scene.add(this.grid);
+
+            // Контроллеры
+            this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+            this.controls.enableDamping = true;
+
+            this.gizmo = new TransformControls(this.camera, this.renderer.domElement);
+            this.gizmo.addEventListener('dragging-changed', e => this.controls.enabled = !e.value);
+            this.scene.add(this.gizmo);
+
+            this.vertexGroup = new THREE.Group();
+            this.scene.add(this.vertexGroup);
+            
+            this.clock = new THREE.Clock();
+        }
+
+        setEditSubMode(mode) {
+            this.editSubMode = mode;
+            console.log("Edit Sub-Mode:", mode);
+            // Визуальное обновление кнопок в UI можно добавить здесь
+            this.buildVertexHelpers(); 
+        }
+
+        setupUI() {
+            window.addEventListener('keydown', (e) => {
+                if (e.key.toLowerCase() === 'e') this.extrude();
+                if (e.key === 'Control') this.sculptSettings.invert = true;
+            });
+            window.addEventListener('keyup', (e) => {
+                if (e.key === 'Control') this.sculptSettings.invert = false;
+            });
+
+            const vp = document.getElementById('viewport');
+            vp.addEventListener('pointerdown', (e) => this.handlePointer(e));
+        }
+
+        handlePointer(e) {
+            if (this.mode === 'SCULPT') {
+                this.isSculpting = true;
+                this.performSculpt(e);
+            } else {
+                this.handleSelection(e);
+            }
+        }
+
+        // Логика скульптинга (втягивание/вытягивание)
+        performSculpt(e) {
+            const hit = this.getRayHit(e);
+            if (!hit || !this.selected) return;
+
+            const pos = this.selected.geometry.attributes.position;
+            const normal = this.selected.geometry.attributes.normal;
+            const matrix = this.selected.matrixWorld;
+            const localHit = hit.point.clone().applyMatrix4(new THREE.Matrix4().copy(matrix).invert());
+
+            const distLimit = this.sculptSettings.radius;
+            const strength = this.sculptSettings.strength * (this.sculptSettings.invert ? -1 : 1);
+
+            for (let i = 0; i < pos.count; i++) {
+                const v = new THREE.Vector3().fromBufferAttribute(pos, i);
+                const d = v.distanceTo(localHit);
+                if (d < distLimit) {
+                    const falloff = (1 - d / distLimit) ** 2;
+                    const vNormal = new THREE.Vector3().fromBufferAttribute(normal, i);
+                    v.addScaledVector(vNormal, strength * falloff);
+                    pos.setXYZ(i, v.x, v.y, v.z);
+                }
+            }
+            pos.needsUpdate = true;
+            this.selected.geometry.computeVertexNormals();
+        }
+
+        // Основа для Extrude (E)
+        extrude() {
+            if (this.mode !== 'EDIT' || !this.selected) return;
+            console.log("Extruding selected " + this.editSubMode);
+            // В NonIndexed геометрии здесь создаются новые треугольники 
+            // и добавляются в BufferAttribute
+            this.selected.geometry.computeVertexNormals();
+        }
+
+        getRayHit(e) {
+            const rect = this.renderer.domElement.getBoundingClientRect();
+            const mouse = new THREE.Vector2(
+                ((e.clientX - rect.left) / rect.width) * 2 - 1,
+                -((e.clientY - rect.top) / rect.height) * 2 + 1
+            );
+            const ray = new THREE.Raycaster();
+            ray.setFromCamera(mouse, this.camera);
+            const intersects = ray.intersectObjects(this.objects, true);
+            return intersects.length > 0 ? intersects[0] : null;
+        }
+
+        // ... остальные методы (addObject, addLight, animate) как в твоем исходнике, 
+        // но с вызовом buildVertexHelpers при смене меша ...
+
+        animate() {
+            requestAnimationFrame(() => this.animate());
+            this.controls.update();
+            this.renderer.render(this.scene, this.camera);
+        }
+    }
+
+    window.app = new VProEngine();
+</script>
+</body>
+</html>
